@@ -1,3 +1,4 @@
+import AppKit
 import MarkdownUI
 import SwiftUI
 
@@ -78,6 +79,52 @@ struct ChatHeaderView: View {
                 .clipShape(Capsule())
 
             Spacer()
+
+            ExternalTargetMenuView()
+        }
+    }
+}
+
+struct ExternalTargetMenuView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        Menu {
+            ForEach(model.availableExternalTargets) { target in
+                Button {
+                    model.openExternally(target)
+                } label: {
+                    ExternalTargetMenuItemLabel(target: target)
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.forward.app")
+                .uiFont(size: 15, weight: .medium)
+                .foregroundStyle(model.selectedProject == nil ? Theme.tertiaryText : Theme.secondaryText)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .disabled(model.selectedProject == nil)
+        .help(model.selectedProject == nil ? "Open a project first" : "Open externally")
+    }
+}
+
+private struct ExternalTargetMenuItemLabel: View {
+    let target: AvailableExternalTarget
+
+    var body: some View {
+        Label {
+            Text(target.displayName)
+        } icon: {
+            if let appIcon = target.appIcon {
+                Image(nsImage: appIcon)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 16, height: 16)
+            } else {
+                Image(systemName: target.fallbackSystemImage)
+            }
         }
     }
 }
