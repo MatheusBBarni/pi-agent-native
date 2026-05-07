@@ -5,6 +5,10 @@ Pi Agent Native is a native macOS shell for the `pi` coding agent. It launches
 Codex-style SwiftUI interface for project sessions, model selection, tool
 activity, process logs, and authentication.
 
+## Screenshot
+
+![Pi Agent Native workspace view](docs/assets/pi-agent-native-screenshot.png)
+
 ## What it does
 
 - Opens local project folders and runs `pi --mode rpc` with the project as the
