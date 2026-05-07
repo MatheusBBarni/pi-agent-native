@@ -1,0 +1,112 @@
+{
+  "tracker": {
+    "kind": "github",
+    "owner": "your-org",
+    "repo": "your-repo",
+    "projectNumber": 1,
+    "apiKeyEnv": "GITHUB_TOKEN"
+  },
+  "project": {
+    "statusField": "Status",
+    "activeStates": ["Backlog", "Todo", "To-Do", "In progress", "In Progress", "In review"],
+    "terminalStates": ["Done", "Closed", "Cancelled"],
+    "startStatus": "In progress",
+    "reviewStatus": "In review",
+    "retryStatus": "To-Do",
+    "ensureStatuses": true
+  },
+  "polling": {
+    "intervalMs": 30000
+  },
+  "workspace": {
+    "root": ".symphony/workspaces"
+  },
+  "git": {
+    "taskBranchPrefix": "symphony/task-",
+    "protectedTrunkBranches": ["main", "master"],
+    "autoMerge": true,
+    "mergeAttentionStatus": "Human attention",
+    "cleanup": {
+      "removeWorktreeAfterMerge": true,
+      "keepTaskBranch": true
+    }
+  },
+  "pullRequest": {
+    "enabled": false,
+    "baseBranch": "main",
+    "title": "Symphony batch from <head_branch>",
+    "body": "Opened automatically by Symphony after orchestration became idle."
+  },
+  "stageAgents": {
+    "enabled": true,
+    "root": ".symphony/agents",
+    "defaultAgent": "engineer",
+    "stages": [
+      {
+        "states": ["Backlog"],
+        "agent": "planner",
+        "skills": [],
+        "successStatus": "To-Do",
+        "retryStatus": "Backlog",
+        "goal": {
+          "enabled": false
+        },
+        "commit": {
+          "enabled": false,
+          "type": "feature",
+          "message": "<type>: <generated_message_max_90char>",
+          "push": false
+        }
+      },
+      {
+        "states": ["Todo", "To-Do", "In progress", "In Progress"],
+        "agent": "engineer",
+        "skills": [],
+        "startStatus": "In progress",
+        "successStatus": "In review",
+        "retryStatus": "To-Do",
+        "goal": {
+          "enabled": false
+        },
+        "commit": {
+          "enabled": true,
+          "type": "feature",
+          "message": "<type>: <generated_message_max_90char>",
+          "push": false
+        }
+      },
+      {
+        "states": ["In review", "In Review"],
+        "agent": "reviewer",
+        "skills": [],
+        "successStatus": "Done",
+        "retryStatus": "In progress",
+        "goal": {
+          "enabled": false
+        },
+        "commit": {
+          "enabled": false,
+          "type": "refactor",
+          "message": "<type>: <generated_message_max_90char>",
+          "push": false
+        }
+      }
+    ]
+  },
+  "agent": {
+    "maxConcurrentAgents": 2,
+    "maxTurns": 10,
+    "maxRetryBackoffMs": 300000
+  },
+  "codex": {
+    "command": "codex exec",
+    "model": "gpt-5.5",
+    "reasoningEffort": "medium",
+    "turnTimeoutMs": 3600000,
+    "readTimeoutMs": 5000,
+    "stallTimeoutMs": 300000
+  },
+  "server": {
+    "port": 8080
+  }
+}
