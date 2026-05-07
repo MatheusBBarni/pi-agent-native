@@ -66,6 +66,11 @@ struct ChatHeaderView: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            if !model.isSidebarVisible {
+                SidebarToggleButtonView()
+                    .padding(.leading, 46)
+            }
+
             Text(model.sessionTitle)
                 .uiFont(size: 16, weight: .semibold)
                 .lineLimit(1)
@@ -83,6 +88,30 @@ struct ChatHeaderView: View {
             ExternalTargetMenuView()
             InspectorToggleButtonView()
         }
+    }
+}
+
+private struct SidebarToggleButtonView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        Button {
+            model.performAppAction(.toggleSidebar)
+        } label: {
+            Image(systemName: "sidebar.left")
+                .uiFont(size: 15, weight: .medium)
+                .foregroundStyle(Theme.accent)
+                .frame(width: 30, height: 30)
+                .background(Theme.elevatedBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.canPerformAppAction(.toggleSidebar))
+        .help(DefaultKeymap.helpText(for: .toggleSidebar) ?? "Toggle sidebar")
+        .accessibilityLabel(Text("Show sidebar"))
+        .accessibilityValue(Text("Sidebar hidden"))
+        .accessibilityHint(Text("Shows the sidebar"))
     }
 }
 
