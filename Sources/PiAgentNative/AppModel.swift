@@ -136,8 +136,10 @@ public final class AppModel: ObservableObject {
         let storedThemeVariant = UserDefaults.standard.string(forKey: "themeVariant").flatMap(AppThemeVariant.init(rawValue:))
         let legacyThemeMode = UserDefaults.standard.string(forKey: "themeMode").flatMap(AppThemeVariant.init(rawValue:))
         let persistedState = SessionStore.load()
-        let persistedProjects = persistedState.projects
-        let persistedSessions = persistedState.sessions
+        let persistedProjects = Self.sanitizePersistedProjects(persistedState.projects)
+        let persistedSessionProjectPaths = Set(persistedProjects.map(\.path))
+        let persistedSessions = persistedState.sessions.filter { persistedSessionProjectPaths.contains($0.projectPath) }
+        let persistedSelectedSessionID = persistedSessions.first(where: { $0.id == persistedState.selectedSessionID })?.id
 
         settingsStore = SettingsStore(customExecutablePath: storedExecutable ?? "")
         workspaceStore = WorkspaceStore(
@@ -147,7 +149,7 @@ public final class AppModel: ObservableObject {
         )
         sessionIndexStore = NativeSessionIndexStore(
             sessions: persistedSessions,
-            selectedSessionID: persistedState.selectedSessionID
+            selectedSessionID: persistedSelectedSessionID
         )
         conversationStore = ConversationStore()
         toolActivityStore = ToolActivityStore()
@@ -169,6 +171,7 @@ public final class AppModel: ObservableObject {
                 )?.id
             }
         }
+        persistState()
         bindStoreChanges()
         refreshGitDetails()
 
@@ -217,6 +220,32 @@ public final class AppModel: ObservableObject {
                 self?.objectWillChange.send()
             }
             .store(in: &storeCancellables)
+    }
+
+    private static func sanitizePersistedProjects(_ persistedProjects: [ProjectItem]) -> [ProjectItem] {
+        var seenPaths = Set<String>()
+        return persistedProjects.compactMap { item in
+            let normalizedPath = URL(fileURLWithPath: item.path).standardized.path
+            guard !normalizedPath.isEmpty,
+                  isExistingDirectory(normalizedPath),
+                  !seenPaths.contains(normalizedPath)
+            else {
+                return nil
+            }
+            seenPaths.insert(normalizedPath)
+
+            var normalizedItem = item
+            normalizedItem.path = normalizedPath
+            if normalizedItem.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                normalizedItem.name = URL(fileURLWithPath: normalizedPath).lastPathComponent
+            }
+            return normalizedItem
+        }
+    }
+
+    private static func isExistingDirectory(_ path: String) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 
     var skillPickerState: SkillPickerState? {
