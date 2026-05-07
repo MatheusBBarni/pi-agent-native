@@ -492,6 +492,81 @@ public final class AppModel: ObservableObject {
         refreshGitDetails()
     }
 
+    func canNavigateToPreviousSession() -> Bool {
+        sessionNavigationTarget(for: .previous) != nil
+    }
+
+    func canNavigateToNextSession() -> Bool {
+        sessionNavigationTarget(for: .next) != nil
+    }
+
+    func navigateToPreviousSession() {
+        navigateSession(.previous)
+    }
+
+    func navigateToNextSession() {
+        navigateSession(.next)
+    }
+
+    func previousSessionHelpText() -> String {
+        sessionNavigationUnavailableReason(for: .previous) ?? SessionNavigationDirection.previous.title
+    }
+
+    func nextSessionHelpText() -> String {
+        sessionNavigationUnavailableReason(for: .next) ?? SessionNavigationDirection.next.title
+    }
+
+    private func navigateSession(_ direction: SessionNavigationDirection) {
+        guard let target = sessionNavigationTarget(for: direction) else { return }
+        switchSession(target)
+    }
+
+    private func sessionNavigationTarget(for direction: SessionNavigationDirection) -> StoredSession? {
+        guard !hasActiveModal,
+              let selectedProject,
+              let selectedSessionID
+        else { return nil }
+
+        let projectSessions = sessionsForProject(selectedProject)
+        guard projectSessions.count > 1,
+              let currentIndex = projectSessions.firstIndex(where: { $0.id == selectedSessionID })
+        else { return nil }
+
+        let adjacentIndex = currentIndex + direction.offset
+        guard projectSessions.indices.contains(adjacentIndex) else { return nil }
+        return projectSessions[adjacentIndex]
+    }
+
+    private func sessionNavigationUnavailableReason(for direction: SessionNavigationDirection) -> String? {
+        if hasActiveModal {
+            return "Close active modal first"
+        }
+
+        guard let selectedProject else {
+            return "Open a project first"
+        }
+
+        guard let selectedSessionID else {
+            return "Select a session first"
+        }
+
+        let projectSessions = sessionsForProject(selectedProject)
+        guard projectSessions.count > 1 else {
+            return "No other sessions"
+        }
+
+        guard let currentIndex = projectSessions.firstIndex(where: { $0.id == selectedSessionID }) else {
+            return "Select a session in this project first"
+        }
+
+        let adjacentIndex = currentIndex + direction.offset
+        guard projectSessions.indices.contains(adjacentIndex) else {
+            return direction.boundaryReason
+        }
+
+        return nil
+    }
+
     func updateComposerSelection(_ selectedRange: NSRange) {
         composerSelectionRange = selectedRange
         refreshMentionPicker()
@@ -1170,6 +1245,32 @@ public final class AppModel: ObservableObject {
             )
         default:
             return nil
+        }
+    }
+
+    private enum SessionNavigationDirection {
+        case previous
+        case next
+
+        var offset: Int {
+            switch self {
+            case .previous: return -1
+            case .next: return 1
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .previous: return "Previous session"
+            case .next: return "Next session"
+            }
+        }
+
+        var boundaryReason: String {
+            switch self {
+            case .previous: return "No previous session"
+            case .next: return "No next session"
+            }
         }
     }
 
