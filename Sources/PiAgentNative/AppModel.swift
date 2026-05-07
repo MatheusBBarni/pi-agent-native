@@ -45,6 +45,8 @@ public final class AppModel: ObservableObject {
     @Published var selectedSessionID: StoredSession.ID?
     @Published var availableExternalTargets: [AvailableExternalTarget] = []
 
+    var externalTargetLauncher: ExternalTargetLaunchAction = ExternalTargetLauncher.launch
+
     private let client = PiRPCClient()
     private var currentAssistantID: UUID?
     private var shouldSwitchToStoredSessionAfterStart = true
@@ -302,7 +304,7 @@ public final class AppModel: ObservableObject {
         }
 
         let projectPath = selectedProject.path
-        ExternalTargetLauncher.launch(target, projectPath: projectPath) { [weak self] result in
+        externalTargetLauncher(target, projectPath) { [weak self] result in
             Task { @MainActor in
                 guard let self else { return }
                 if case .failure(let error) = result {

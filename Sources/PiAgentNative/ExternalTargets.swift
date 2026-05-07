@@ -43,6 +43,12 @@ struct AvailableExternalTarget: Identifiable, Equatable {
     }
 }
 
+typealias ExternalTargetLaunchAction = (
+    AvailableExternalTarget,
+    String,
+    @escaping (Result<Void, Error>) -> Void
+) -> Void
+
 enum ExternalTargetCatalog {
     static let definitions: [ExternalTargetDefinition] = [
         ExternalTargetDefinition(

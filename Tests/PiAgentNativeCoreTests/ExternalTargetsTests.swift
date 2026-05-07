@@ -113,4 +113,62 @@ final class ExternalTargetsTests: XCTestCase {
 
         wait(for: [expectation], timeout: 2)
     }
+
+    @MainActor
+    func testOpenExternallyReportsFailureWithoutClearingCurrentState() async {
+        struct LaunchFailure: LocalizedError {
+            var errorDescription: String? { "Launch failed for test" }
+        }
+
+        let model = AppModel()
+        let project = ProjectItem(name: "My Project", path: "/tmp/My Project")
+        let session = StoredSession(
+            id: "session-1",
+            projectPath: project.path,
+            projectName: project.name,
+            title: "Existing session",
+            status: "current",
+            sessionFile: "/tmp/session.json",
+            updatedAt: Date(timeIntervalSince1970: 1)
+        )
+        let message = ChatMessage(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            role: .user,
+            title: "You",
+            text: "Keep this message",
+            timestamp: Date(timeIntervalSince1970: 2)
+        )
+        let target = AvailableExternalTarget(
+            definition: ExternalTargetCatalog.definitions.first { $0.id == .vscode }!,
+            launchReference: .commandPath("/custom/bin/code")
+        )
+        var launchedProjectPath: String?
+
+        model.projects = [project]
+        model.selectedProjectID = project.id
+        model.sessions = [session]
+        model.selectedSessionID = session.id
+        model.messages = [message]
+        model.composerText = "draft prompt"
+        model.externalTargetLauncher = { _, projectPath, completion in
+            launchedProjectPath = projectPath
+            completion(.failure(LaunchFailure()))
+        }
+
+        model.openExternally(target)
+        await Task.yield()
+
+        XCTAssertEqual(launchedProjectPath, project.path)
+        XCTAssertEqual(model.statusText, "Could not open in VS Code")
+        XCTAssertEqual(model.eventLog.first?.title, "open externally failed")
+        XCTAssertTrue(model.eventLog.first?.detail.contains("target=VS Code") == true)
+        XCTAssertTrue(model.eventLog.first?.detail.contains("projectPath=/tmp/My Project") == true)
+        XCTAssertTrue(model.eventLog.first?.detail.contains("Launch failed for test") == true)
+        XCTAssertEqual(model.projects, [project])
+        XCTAssertEqual(model.selectedProjectID, project.id)
+        XCTAssertEqual(model.sessions, [session])
+        XCTAssertEqual(model.selectedSessionID, session.id)
+        XCTAssertEqual(model.messages, [message])
+        XCTAssertEqual(model.composerText, "draft prompt")
+    }
 }
