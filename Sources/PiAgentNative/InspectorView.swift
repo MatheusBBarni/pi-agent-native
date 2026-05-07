@@ -25,6 +25,18 @@ struct InspectorView: View {
                             InspectorMetric(icon: "tray", title: "\(model.pendingMessageCount) queued")
                         }
                     }
+
+                    if !model.tools.isEmpty {
+                        InspectorCard(title: "Tool activity") {
+                            ForEach(model.tools) { tool in
+                                ToolActivityRow(tool: tool)
+                                if tool.id != model.tools.last?.id {
+                                    Divider()
+                                        .overlay(Theme.border)
+                                }
+                            }
+                        }
+                    }
                 }
                 .padding(.bottom, 16)
             }
@@ -88,7 +100,7 @@ struct ToolActivityRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 8) {
-                Image(systemName: tool.isRunning ? "circle.dotted" : (tool.isError ? "xmark.circle" : "checkmark.circle"))
+                Image(systemName: icon)
                     .foregroundStyle(tool.isError ? Theme.red : (tool.isRunning ? Theme.accent : Theme.green))
                 Text(tool.name)
                     .uiFont(size: 12, weight: .semibold)
@@ -102,12 +114,35 @@ struct ToolActivityRow: View {
                 .lineLimit(2)
 
             if !tool.output.isEmpty {
-                Text(tool.output)
-                    .uiFont(size: 11, design: .monospaced)
-                    .foregroundStyle(Theme.tertiaryText)
-                    .lineLimit(5)
+                DisclosureGroup {
+                    Text(tool.output)
+                        .uiFont(size: 11, design: .monospaced)
+                        .foregroundStyle(Theme.tertiaryText)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 4)
+                } label: {
+                    Text("Output")
+                        .uiFont(size: 11, weight: .medium)
+                        .foregroundStyle(Theme.tertiaryText)
+                }
             }
         }
         .padding(.vertical, 4)
+    }
+
+    private var icon: String {
+        switch tool.status {
+        case .queued:
+            return "clock"
+        case .running:
+            return "circle.dotted"
+        case .succeeded:
+            return "checkmark.circle"
+        case .failed:
+            return "xmark.circle"
+        case .cancelled:
+            return "slash.circle"
+        }
     }
 }

@@ -70,6 +70,15 @@ public struct AppShellView: View {
                         .environmentObject(model)
                 }
             }
+
+            if let request = model.extensionUIRouter.activeRequest {
+                ModalBackdrop {
+                    model.cancelExtensionUIRequest()
+                } content: {
+                    ExtensionUIDialogView(request: request)
+                        .environmentObject(model)
+                }
+            }
         }
         .foregroundStyle(Theme.primaryText)
         .background(Theme.windowBackground)
