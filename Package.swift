@@ -25,6 +25,11 @@ let package = Package(
             name: "PiAgentNativeExecutable",
             dependencies: ["PiAgentNativeCore"],
             path: "Sources/PiAgentNativeExecutable"
+        ),
+        .testTarget(
+            name: "PiAgentNativeTests",
+            dependencies: ["PiAgentNativeCore"],
+            path: "Tests/PiAgentNativeTests"
         )
     ]
 )

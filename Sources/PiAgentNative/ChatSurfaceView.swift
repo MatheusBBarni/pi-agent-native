@@ -144,10 +144,11 @@ struct ComposerView: View {
         VStack(spacing: 8) {
             PromptTextView(
                 text: $model.composerText,
+                focusRequest: model.composerFocusRequest,
                 placeholder: "Ask pi to work in this workspace",
                 fontSize: model.uiFontSize,
                 isEditable: !model.isStreaming,
-                onSubmit: model.sendPrompt,
+                onSubmit: { model.performAppAction(.sendPrompt) },
                 onCycleReasoning: model.cycleThinkingLevel
             )
             .frame(minHeight: 48, maxHeight: 86)
@@ -188,12 +189,12 @@ struct ComposerView: View {
                 Spacer()
 
                 Button {
-                    model.refreshState()
+                    model.performAppAction(.refreshState)
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
                 .buttonStyle(IconButtonStyle())
-                .help("Refresh state")
+                .help("Refresh state - \(DefaultKeymap.displayLabel(for: .refreshState) ?? "")")
 
                 Button {
                     model.showModelPicker()
@@ -230,8 +231,7 @@ struct ComposerView: View {
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .keyboardShortcut(.return, modifiers: [.command])
-                .disabled(!model.isStreaming && model.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(!model.isStreaming && !model.canSendPrompt)
             }
             .padding(.horizontal, 10)
         }

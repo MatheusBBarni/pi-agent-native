@@ -3,6 +3,7 @@ import AppKit
 
 struct PromptTextView: NSViewRepresentable {
     @Binding var text: String
+    var focusRequest: Int
     var placeholder: String
     var fontSize = 15.0
     var isEditable = true
@@ -43,6 +44,12 @@ struct PromptTextView: NSViewRepresentable {
         if textView.string != text {
             textView.string = text
         }
+        if context.coordinator.lastFocusRequest != focusRequest {
+            context.coordinator.lastFocusRequest = focusRequest
+            DispatchQueue.main.async {
+                scrollView.window?.makeFirstResponder(textView)
+            }
+        }
         textView.onSubmit = onSubmit
         textView.onCycleReasoning = onCycleReasoning
         textView.placeholder = placeholder
@@ -57,6 +64,7 @@ struct PromptTextView: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         @Binding var text: String
+        var lastFocusRequest = 0
 
         init(text: Binding<String>) {
             _text = text
@@ -76,16 +84,20 @@ final class SubmitTextView: NSTextView {
     var placeholder = ""
 
     override func keyDown(with event: NSEvent) {
+        let modifiers = event.normalizedKeybindingModifiers
+
         if event.keyCode == 36 || event.keyCode == 76 {
-            if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.shift) {
+            if modifiers.isEmpty || modifiers == .command {
+                onSubmit?()
+            } else if modifiers == .shift {
                 insertNewlineIgnoringFieldEditor(self)
             } else {
-                onSubmit?()
+                super.keyDown(with: event)
             }
             return
         }
 
-        if event.keyCode == 48, event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.shift) {
+        if event.keyCode == 48, modifiers == .shift {
             onCycleReasoning?()
             return
         }
