@@ -116,6 +116,10 @@ struct LoginSheetView: View {
                 }
             }
 
+            Text("Use the terminal command `pi /login` to authenticate your subscription.")
+                .uiFont(size: 12)
+                .foregroundStyle(Theme.secondaryText)
+
             HStack {
                 Button(oauthRunner.isRunning ? "Running..." : "Start Login") {
                     loginURLOpeningTracker.reset()
@@ -143,7 +147,7 @@ struct LoginSheetView: View {
             }
 
             ScrollView {
-                Text(oauthRunner.output.isEmpty ? "Start login to see browser and device-code instructions." : oauthRunner.output)
+                Text(oauthRunner.output.isEmpty ? "Use `pi /login` in terminal to complete subscription authentication." : oauthRunner.output)
                     .uiFont(size: 12, design: .monospaced)
                     .foregroundStyle(Theme.secondaryText)
                     .textSelection(.enabled)
@@ -155,7 +159,7 @@ struct LoginSheetView: View {
             .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
 
             HStack {
-                TextField("Type a response for the login process", text: $terminalInput)
+                TextField("Paste terminal responses here when needed", text: $terminalInput)
                     .textFieldStyle(.plain)
                     .uiFont(size: 12, design: .monospaced)
                     .padding(9)

@@ -9,21 +9,26 @@ public struct AppShellView: View {
     public var body: some View {
         ZStack {
             HStack(spacing: 0) {
-                if model.isSidebarVisible {
-                    SidebarView()
-                        .frame(width: 268)
+                SidebarView()
+                    .frame(width: model.isSidebarVisible ? 268 : 0)
+                    .opacity(model.isSidebarVisible ? 1 : 0)
+                    .allowsHitTesting(model.isSidebarVisible)
+                    .clipped()
 
-                    Divider()
-                        .overlay(Theme.border)
-                }
+                Divider()
+                    .overlay(Theme.border)
+                    .frame(width: model.isSidebarVisible ? 1 : 0)
+                    .opacity(model.isSidebarVisible ? 1 : 0)
+                    .clipped()
 
                 ChatSurfaceView()
                     .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
 
-                if model.isInspectorVisible {
-                    InspectorView()
-                        .frame(width: 280)
-                }
+                InspectorView()
+                    .frame(width: model.isInspectorVisible ? 280 : 0)
+                    .opacity(model.isInspectorVisible ? 1 : 0)
+                    .allowsHitTesting(model.isInspectorVisible)
+                    .clipped()
             }
             .disabled(model.hasActiveModal)
             .accessibilityHidden(model.hasActiveModal)

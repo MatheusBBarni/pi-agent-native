@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import SwiftUI
 
 @MainActor
 public final class AppModel: ObservableObject {
@@ -405,9 +406,13 @@ public final class AppModel: ObservableObject {
         case .openKeybindingHelp:
             isShowingKeybindingHelp = true
         case .toggleSidebar:
-            isSidebarVisible.toggle()
+            withAnimation(.easeInOut(duration: 0.16)) {
+                isSidebarVisible.toggle()
+            }
         case .toggleInspector:
-            isInspectorVisible.toggle()
+            withAnimation(.easeInOut(duration: 0.16)) {
+                isInspectorVisible.toggle()
+            }
         case .sendPrompt:
             sendPrompt()
         case .stopGeneration:
