@@ -26,7 +26,7 @@ In scope:
 - Validating every requested skill against the available skills reported by the running Pi coding agent.
 - Showing pending selected skills as removable chips.
 - Appending unique skills to the pending selection across repeated valid slash-command submissions.
-- Applying pending skills to the next normal prompt by prepending a native-generated natural-language skill instruction to the RPC prompt message.
+- Applying pending skills to the next normal prompt by prepending native-expanded skill content to the RPC prompt message.
 - Clearing pending selected skills after the next normal prompt is submitted.
 
 Out of scope:
@@ -39,6 +39,7 @@ Out of scope:
 - Comma-separated skill lists.
 - Mixing `/skill:` tokens and natural-language prompt text in one composer submission.
 - Skill autocomplete when the running Pi coding agent cannot provide available skills.
+- Delegating multi-skill expansion to repeated `/skill:<skill-id>` tokens in a single RPC prompt.
 
 ## 2. Definitions
 
@@ -58,7 +59,7 @@ Out of scope:
 
 **Selected Skill Chip**: A visible composer control that shows one selected Skill before it is consumed by the next normal prompt.
 
-**Skill Instruction**: Native-generated prompt text that tells the Pi Coding Agent which Skills to use for the current request.
+**Skill Instruction**: Native-generated prompt text that embeds selected Skill contents before the current request.
 
 **Normal Prompt**: Composer text that is not handled as a Composer Slash Command.
 
@@ -70,11 +71,11 @@ Out of scope:
 - **REQ-004**: The app shall reject mixed Skill Selection and Normal Prompt text such as `/skill:diagnose fix this crash`.
 - **REQ-005**: The app shall treat a submitted Skill Selection as selection for the next Normal Prompt, not as immediate skill execution.
 - **REQ-006**: The app shall validate every requested skill id against the available skills reported by the running Pi Coding Agent before changing pending selected skills.
-- **REQ-007**: If one or more requested skill ids are unknown, unavailable, duplicated inside the submitted command line, or malformed, the app shall not partially apply the submitted Skill Selection.
+- **REQ-007**: If one or more requested skill ids are unknown, unavailable, or malformed, the app shall not partially apply the submitted Skill Selection.
 - **REQ-008**: If available skills cannot be loaded from the running Pi Coding Agent, Skill Selection shall be unavailable.
 - **REQ-009**: The app shall not scan native filesystem skill directories to validate skill ids.
 - **REQ-010**: A valid submitted Skill Selection shall append unique new Skills to the pending selected skills.
-- **REQ-011**: Submitting a skill that is already pending shall not create a duplicate Selected Skill Chip.
+- **REQ-011**: Repeated valid Skill ids, whether already pending or repeated inside one submitted command line, shall not create duplicate Selected Skill Chips.
 - **REQ-012**: The app shall clear composer text after successfully handling a valid submitted Skill Selection.
 - **REQ-013**: The app shall show one Selected Skill Chip for each pending selected Skill.
 - **REQ-014**: Each Selected Skill Chip shall expose a remove control for that Skill.
@@ -100,7 +101,7 @@ Out of scope:
 - **REQ-034**: Completing a Skill Picker result shall insert `/skill:<skill-id>` plus one trailing space.
 - **REQ-035**: Choosing a Skill Picker row shall not create a Selected Skill Chip until the slash-command line is submitted.
 - **REQ-036**: When a Normal Prompt is submitted with pending selected Skills, the app shall send the Pi Coding Agent a single prompt message containing a Skill Instruction followed by the user's prompt text.
-- **REQ-037**: The Skill Instruction shall use natural language that the Pi Coding Agent understands, such as `Use these skills for this request: diagnose, zoom-out.`.
+- **REQ-037**: The Skill Instruction shall embed each selected Skill's `SKILL.md` content in Pi-compatible `<skill>` blocks, using the exact skill paths reported by `get_commands`.
 - **REQ-038**: The user-visible conversation message shall show the user's original Normal Prompt, not the generated Skill Instruction prefix.
 - **REQ-039**: The existing RPC prompt command shall continue sending a single string `message` value.
 - **CON-001**: The implementation must not introduce a structured skill payload in the RPC prompt command for this issue.
@@ -108,8 +109,10 @@ Out of scope:
 - **CON-003**: The implementation must not silently accept unvalidated skill ids.
 - **CON-004**: Standard macOS text editing shortcuts must remain owned by the text view.
 - **CON-005**: Skill Picker navigation is local composer interaction and is not part of the Default Keymap.
+- **CON-006**: The implementation must not rely on Pi expanding repeated `/skill:<skill-id>` tokens in one prompt; current Pi RPC expands only the first slash command and treats later text as that command's arguments.
 - **GUD-001**: Prefer sharing picker interaction primitives with the Mention Picker while keeping Skill Query parsing and Skill result ranking separate.
 - **GUD-002**: Keep skill availability refresh tied to Pi RPC state or command discovery rather than local filesystem state.
+- **GUD-003**: Reading exact `SKILL.md` files returned by `get_commands` is allowed because the running Pi Coding Agent remains the discovery authority; do not scan local skill directories.
 - **PAT-001**: Keep slash-command parsing, skill validation, pending selection state, picker search, and prompt decoration as separate testable units.
 
 ## 4. Interfaces & Data Contracts
@@ -120,7 +123,7 @@ The existing prompt RPC contract remains a single string message:
 {
   "id": "request-id",
   "type": "prompt",
-  "message": "Use these skills for this request: diagnose, zoom-out.\n\nInvestigate why the app crashes after login."
+  "message": "<skill name=\"diagnose\" location=\"/path/to/diagnose/SKILL.md\">\nReferences are relative to /path/to/diagnose.\n\n# Diagnose\n...\n</skill>\n\n<skill name=\"zoom-out\" location=\"/path/to/zoom-out/SKILL.md\">\nReferences are relative to /path/to/zoom-out.\n\n# Zoom Out\n...\n</skill>\n\nInvestigate why the app crashes after login."
 }
 ```
 
@@ -137,6 +140,8 @@ struct AvailableSkill: Identifiable, Equatable {
     let id: String
     let displayName: String?
     let description: String?
+    let skillFilePath: String?
+    let skillBaseDir: String?
 }
 
 struct SkillQuery: Equatable {
@@ -179,7 +184,7 @@ Required components:
 
 | Component | Responsibility |
 |---|---|
-| Available skill provider | Load and refresh available skills from the running Pi Coding Agent. |
+| Available skill provider | Load and refresh available skills from the running Pi Coding Agent's RPC `get_commands` response by filtering commands whose `source` is `skill` and whose `name` uses the `skill:<skill-id>` form. Preserve the reported `sourceInfo.path` and `sourceInfo.baseDir` when present. |
 | Skill query detector | Find the active `/skill:` query based on composer text and cursor position. |
 | Skill searcher | Filter, rank, and cap results for the current query. |
 | Skill picker view | Render rows, highlight state, empty states, pointer hover, and click completion. |
@@ -187,7 +192,61 @@ Required components:
 | Slash-command parser | Distinguish Skill Selection from Normal Prompt text and invalid slash-command text. |
 | Skill validator | Resolve every requested skill id against available skills and enforce all-or-nothing application. |
 | Pending skill store | Maintain one-shot pending Skills, append unique Skills, remove one Skill, clear all Skills, and clear after prompt submission. |
-| Prompt decorator | Prefix the RPC prompt message with a Skill Instruction while keeping user-visible text unchanged. |
+| Skill content expander | Read the exact `SKILL.md` files reported by `get_commands`, strip frontmatter, and format Pi-compatible `<skill>` blocks. |
+| Prompt decorator | Prefix the RPC prompt message with expanded Skill Instruction blocks while keeping user-visible text unchanged. |
+
+Available-skill RPC discovery contract:
+
+```json
+{
+  "id": "request-id",
+  "type": "get_commands"
+}
+```
+
+```json
+{
+  "type": "response",
+  "id": "request-id",
+  "command": "get_commands",
+  "success": true,
+  "data": {
+    "commands": [
+      {
+        "name": "skill:diagnose",
+        "description": "Disciplined diagnosis loop for hard bugs.",
+        "source": "skill",
+        "sourceInfo": {
+          "path": "/path/to/SKILL.md",
+          "source": "local",
+          "scope": "project",
+          "origin": "top-level",
+          "baseDir": "/path/to/skill"
+        }
+      }
+    ]
+  }
+}
+```
+
+Pi Agent Native derives the native skill id by filtering `commands` to entries where `source == "skill"` and `name` starts with `skill:`, then stripping the `skill:` prefix. If the running Pi Coding Agent returns an unsupported-command error or omits a usable `commands` array, Pi Agent Native must set available Skills to unavailable and reject submitted Skill Selections rather than falling back to local skill scans.
+
+For selected Skills, Pi Agent Native should read the exact `sourceInfo.path` returned by `get_commands` and format the stripped Markdown content the same way Pi expands a skill command:
+
+```text
+<skill name="diagnose" location="/path/to/diagnose/SKILL.md">
+References are relative to /path/to/diagnose.
+
+# Diagnose
+...
+</skill>
+
+<user prompt>
+```
+
+Use the parent directory of the returned `SKILL.md` as the references directory. Do not rely on `sourceInfo.baseDir` for expansion, because current RPC responses may report a parent resource root rather than the individual skill directory. If a selected Skill has no readable `SKILL.md` path, the app must not send the prompt; keep the pending selection and show a clear user-facing error.
+
+This native expansion is required for multi-skill support. Local RPC validation showed that `/skill:test-a /skill:test-b hello` expands only `test-a`; `/skill:test-b hello` remains plain argument text inside the first skill command.
 
 Skill selection syntax:
 
@@ -195,6 +254,7 @@ Skill selection syntax:
 |---|---|
 | `/skill:diagnose` | Select `diagnose` for the next Normal Prompt. |
 | `/skill:diagnose /skill:zoom-out` | Select `diagnose` and `zoom-out` for the next Normal Prompt. |
+| `/skill:diagnose /skill:diagnose` | Select `diagnose` once for the next Normal Prompt. |
 | `/skill:diagnose,zoom-out` | Invalid. |
 | `/skill:diagnose fix this crash` | Invalid mixed command and prompt text. |
 | `/help` | Not handled by this feature. No Skill Picker opens. |
@@ -209,13 +269,30 @@ Skill Picker completion format:
 Skill Instruction format:
 
 ```text
-Use this skill for this request: diagnose.
+<skill name="diagnose" location="/path/to/diagnose/SKILL.md">
+References are relative to /path/to/diagnose.
+
+# Diagnose
+...
+</skill>
 
 <user prompt>
 ```
 
 ```text
-Use these skills for this request: diagnose, zoom-out.
+<skill name="diagnose" location="/path/to/diagnose/SKILL.md">
+References are relative to /path/to/diagnose.
+
+# Diagnose
+...
+</skill>
+
+<skill name="zoom-out" location="/path/to/zoom-out/SKILL.md">
+References are relative to /path/to/zoom-out.
+
+# Zoom Out
+...
+</skill>
 
 <user prompt>
 ```
@@ -239,7 +316,7 @@ Use these skills for this request: diagnose, zoom-out.
 - **AC-015**: Given `diagnose` is already pending, When `/skill:diagnose /skill:zoom-out` is submitted, Then only `zoom-out` is added and `diagnose` is not duplicated.
 - **AC-016**: Given a Selected Skill Chip is visible, When its remove control is activated, Then that skill is removed from the pending selection.
 - **AC-017**: Given more than one Selected Skill Chip is visible, When clear-all is activated, Then all pending selected Skills are removed.
-- **AC-018**: Given pending selected Skills exist and the user submits a Normal Prompt, Then the RPC prompt message starts with the correct Skill Instruction.
+- **AC-018**: Given pending selected Skills exist and the user submits a Normal Prompt, Then the RPC prompt message starts with Pi-compatible `<skill>` blocks for every selected Skill.
 - **AC-019**: Given pending selected Skills exist and the user submits a Normal Prompt, Then the user-visible conversation shows the original Normal Prompt without the generated Skill Instruction.
 - **AC-020**: Given pending selected Skills exist and the user submits a Normal Prompt, Then pending selected Skills are cleared after submission.
 - **AC-021**: Given no pending selected Skills exist and the user submits a Normal Prompt, Then the existing prompt RPC message remains unchanged.
@@ -247,30 +324,30 @@ Use these skills for this request: diagnose, zoom-out.
 
 ## 6. Test Automation Strategy
 
-- **Test Levels**: Unit tests for slash-command parsing, query detection, ranking, validation, pending selection state, prompt decoration, and duplicate handling; UI smoke tests for picker opening, navigation, completion, chip removal, and prompt submission.
+- **Test Levels**: Unit tests for slash-command parsing, query detection, ranking, validation, pending selection state, skill content expansion, prompt decoration, and duplicate handling; UI smoke tests for picker opening, navigation, completion, chip removal, and prompt submission.
 - **Frameworks**: Swift XCTest for pure logic and AppKit-compatible composer tests where possible. Manual macOS UI verification is acceptable until a UI automation target exists.
 - **Test Data Management**: Use injected available-skill lists with ids, display names, and descriptions. Include known, unknown, duplicate, malformed, and multi-skill command inputs.
 - **CI/CD Integration**: Run `swift build` and any added XCTest target in the repository build workflow.
-- **Coverage Requirements**: Unit tests should cover every accepted syntax form, every rejected syntax form, unavailable skill data, all-or-nothing validation, duplicate suppression, one-shot clearing, and prompt decoration.
+- **Coverage Requirements**: Unit tests should cover every accepted syntax form, every rejected syntax form, unavailable skill data, all-or-nothing validation, duplicate suppression, one-shot clearing, frontmatter stripping, unreadable skill-file failure, and prompt decoration.
 - **Performance Testing**: No dedicated performance tests are required. Skill search must operate over the available-skill list without blocking text entry on the main actor.
 
 ## 7. Rationale & Context
 
 The issue originally used "invoke a skill", which could mean immediate execution or selecting context for a later prompt. The resolved behavior is Skill Selection: `/skill:<skill-id>` selects one or more skills for the next Normal Prompt and does not execute the skill by itself.
 
-The Pi Coding Agent already understands natural-language skill instructions such as "use skill diagnose for this request". Therefore the first version keeps the existing single-string prompt RPC contract and prepends a native-generated Skill Instruction to the RPC message when pending skills are present.
+The Pi Coding Agent already exposes available skill commands through `get_commands`, and the native app can preserve the existing single-string prompt RPC contract by expanding selected skill files into the prompt message. This avoids adding a structured RPC field while still supporting multiple selected Skills deterministically.
 
 The user-visible conversation omits the generated Skill Instruction so the transcript reflects what the user typed while the agent still receives the required skill context. Selected Skill Chips make that hidden prompt decoration visible and removable before submission.
 
 The Skill Picker follows the local interaction model established by the Mention Picker from issue 1, but it opens only for `/skill:` queries. It is not a general slash-command picker.
 
-No ADR is required for this version because the decisions are reversible product and interaction-scope decisions. A future structured RPC skill-selection field can replace prompt decoration without changing the user-facing Skill Selection model.
+No ADR is required for this version because the decisions are reversible product and interaction-scope decisions. A future structured RPC skill-selection field can replace native prompt decoration without changing the user-facing Skill Selection model.
 
 ## 8. Dependencies & External Integrations
 
 ### External Systems
 
-- **EXT-001**: Pi Coding Agent RPC process - Required to provide or validate available Skills and receive prompt messages.
+- **EXT-001**: Pi Coding Agent RPC process - Required to provide or validate available Skills through the existing `get_commands` command and receive prompt messages.
 
 ### Third-Party Services
 
@@ -282,7 +359,7 @@ No ADR is required for this version because the decisions are reversible product
 
 ### Data Dependencies
 
-- **DAT-001**: Available Skills - Required to populate the Skill Picker and validate Skill Selection.
+- **DAT-001**: Available Skills - Required to populate the Skill Picker, validate Skill Selection, and locate the exact `SKILL.md` files to expand. In current Pi RPC, these are derived from `get_commands` entries where `source == "skill"`; strip the `skill:` prefix to get the native skill id.
 - **DAT-002**: Composer text and selection range - Required to detect and replace the active Skill Query.
 - **DAT-003**: Pending selected Skills - Required to render Selected Skill Chips and decorate the next Normal Prompt.
 
@@ -325,7 +402,19 @@ State:  No Selected Skill Chip until the command line is submitted
 Prompt decoration:
 Pending Skills: diagnose, zoom-out
 User prompt:    Investigate the login crash.
-RPC message:    Use these skills for this request: diagnose, zoom-out.
+RPC message:    <skill name="diagnose" location="/path/to/diagnose/SKILL.md">
+                References are relative to /path/to/diagnose.
+
+                # Diagnose
+                ...
+                </skill>
+
+                <skill name="zoom-out" location="/path/to/zoom-out/SKILL.md">
+                References are relative to /path/to/zoom-out.
+
+                # Zoom Out
+                ...
+                </skill>
 
                 Investigate the login crash.
 Conversation:   Investigate the login crash.
@@ -346,7 +435,25 @@ Result: No pending skills change
 Error:  Unknown skill: unknown
 ```
 
-## 10. Validation Criteria
+```text
+Duplicate command tokens:
+Input:  /skill:diagnose /skill:diagnose
+Result: One pending Selected Skill Chip: diagnose
+Sent:   No RPC prompt is sent yet
+```
+
+## 10.1 Implementation Handoff Notes
+
+- The current native codebase does not yet include the Mention Picker from issue 1. Build a small reusable composer suggestion list if useful, but keep Skill Query parsing, Skill ranking, and Skill Selection state separate from future File Mention behavior.
+- The current native RPC layer sends `get_state`, `get_available_models`, `get_session_stats`, and prompt/session commands. Add an available-skill refresh path that sends `get_commands` after start and refresh, parses `source == "skill"` command entries into `AvailableSkill`, and treats unsupported or malformed responses as unavailable.
+- Do not send repeated `/skill:<skill-id>` tokens to RPC as the implementation of multi-skill selection. Local validation against `pi --mode rpc` showed only the first token expands; later `/skill:` tokens are treated as argument text.
+- Add a small skill expansion helper that reads only the `SKILL.md` paths returned by `get_commands`, strips YAML frontmatter, formats `<skill>` blocks, and fails without sending the prompt if any selected file cannot be read.
+- Keep the prompt send path split into `visiblePrompt` and `rpcPrompt`: append `visiblePrompt` to `messages`, use it for generated session titles, but send `rpcPrompt` through the existing single-string `message` field.
+- Preserve the new-session path by storing the decorated RPC prompt in the deferred send slot while keeping the visible prompt in the transcript and title logic.
+- `PromptTextView` currently owns Return and Shift-Tab in `SubmitTextView.keyDown`. Extend that bridge so active Skill Picker handling gets first chance at Up, Down, Return, Tab, and Escape, while normal text editing remains unchanged when the picker is inactive.
+- Add a SwiftPM test target for pure Skill Selection logic. There are no existing tests in this repository, so the first engineer should keep tests focused on parser, query detection, ranking, validation, dedupe, skill expansion, prompt decoration, and one-shot clearing.
+
+## 10.2 Validation Criteria
 
 - Skill Picker opens only for active `/skill:` queries.
 - Skill Picker does not open for unrelated slash-prefixed text.
@@ -356,7 +463,7 @@ Error:  Unknown skill: unknown
 - Valid repeated `/skill:<skill-id>` tokens append unique pending skills.
 - Selected Skill Chips support remove-one and clear-all behavior.
 - Pending selected Skills are one-shot and clear after the next Normal Prompt is submitted.
-- RPC prompt messages include a natural-language Skill Instruction only when pending selected Skills exist.
+- RPC prompt messages include expanded `<skill>` blocks only when pending selected Skills exist.
 - User-visible conversation messages do not include the generated Skill Instruction.
 - Existing composer send, newline, thinking-level cycling, copy, paste, undo, redo, deletion, and cursor movement behavior remain intact.
 
