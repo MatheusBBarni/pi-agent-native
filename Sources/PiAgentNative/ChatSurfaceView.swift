@@ -191,14 +191,6 @@ struct ComposerView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            if let pickerState = model.skillPickerState {
-                SkillPickerView(
-                    state: pickerState,
-                    onHighlight: model.highlightSkill,
-                    onSelect: model.completeSkillQuery
-                )
-            }
-
             if !model.pendingSelectedSkills.isEmpty {
                 PendingSkillSelectionView()
             }
@@ -315,15 +307,28 @@ struct ComposerView: View {
         .background(Theme.composerBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(alignment: .topLeading) {
-            if let state = model.mentionPickerState {
-                MentionPickerView(
-                    state: state,
-                    onHover: model.highlightMentionResult,
-                    onSelect: model.insertMentionResult
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .offset(y: -MentionPickerView.preferredHeight(for: state) - 8)
+            ZStack(alignment: .topLeading) {
+                if let state = model.mentionPickerState {
+                    MentionPickerView(
+                        state: state,
+                        onHover: model.highlightMentionResult,
+                        onSelect: model.insertMentionResult
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .offset(y: -MentionPickerView.preferredHeight(for: state) - 8)
+                }
+
+                if let pickerState = model.skillPickerState {
+                    SkillPickerView(
+                        state: pickerState,
+                        onHighlight: model.highlightSkill,
+                        onSelect: model.completeSkillQuery
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .offset(y: -SkillPickerView.preferredHeight(for: pickerState) - 8)
+                }
             }
+            .zIndex(2)
         }
     }
 
@@ -400,32 +405,53 @@ struct SkillPickerView: View {
     let onHighlight: (AvailableSkill) -> Void
     let onSelect: (AvailableSkill) -> Void
 
+    static func preferredHeight(for state: SkillPickerState) -> CGFloat {
+        let rowCount: Int
+        switch state.status {
+        case .results:
+            rowCount = max(1, state.results.count)
+        case .empty, .unavailable:
+            rowCount = 1
+        }
+        return min(CGFloat(rowCount) * 38 + 10, 322)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            switch state.status {
-            case .results:
-                ForEach(state.results) { skill in
-                    SkillPickerRow(
-                        skill: skill,
-                        isHighlighted: skill.id == state.highlightedSkillID,
-                        onHighlight: { onHighlight(skill) },
-                        onSelect: { onSelect(skill) }
-                    )
+        Group {
+            if state.status == .results {
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical, showsIndicators: true) {
+                        VStack(spacing: 0) {
+                            ForEach(state.results) { skill in
+                                SkillPickerRow(
+                                    skill: skill,
+                                    isHighlighted: skill.id == state.highlightedSkillID,
+                                    onHighlight: { onHighlight(skill) },
+                                    onSelect: { onSelect(skill) }
+                                )
+                                .id(skill.id)
+                            }
+                        }
+                    }
+                    .onChange(of: state.highlightedSkillID) { _, highlightedID in
+                        guard let highlightedID else { return }
+                        proxy.scrollTo(highlightedID)
+                    }
                 }
-            case .empty:
+            } else if state.status == .empty {
                 SkillPickerDisabledRow(text: "No matching skills")
-            case .unavailable(let message):
+            } else if case .unavailable(let message) = state.status {
                 SkillPickerDisabledRow(text: message)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.elevatedBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay {
+        .frame(height: Self.preferredHeight(for: state), alignment: .top)
+        .background(Theme.panelBackground)
+        .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Theme.border.opacity(0.8), lineWidth: 1)
-        }
-        .shadow(color: Color.black.opacity(0.22), radius: 14, x: 0, y: 8)
+                .stroke(Theme.border, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .shadow(color: Color.black.opacity(0.22), radius: 18, x: 0, y: 10)
     }
 }
 
@@ -436,31 +462,36 @@ private struct SkillPickerRow: View {
     let onSelect: () -> Void
 
     var body: some View {
-        Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(skill.id)
-                    .uiFont(size: 13, weight: .semibold)
-                    .foregroundStyle(Theme.primaryText)
-                    .lineLimit(1)
+        HStack(spacing: 10) {
+            Image(systemName: "sparkles")
+                .frame(width: 18)
+                .foregroundStyle(isHighlighted ? Theme.windowBackground : Theme.tertiaryText)
 
-                if let detail {
-                    Text(detail)
-                        .uiFont(size: 12)
-                        .foregroundStyle(Theme.tertiaryText)
-                        .lineLimit(1)
-                }
+            Text(skill.id)
+                .uiFont(size: 13, weight: .medium)
+                .foregroundStyle(isHighlighted ? Theme.windowBackground : Theme.primaryText)
+                .lineLimit(1)
+
+            Spacer(minLength: 12)
+
+            if let detail {
+                Text(detail)
+                    .uiFont(size: 12)
+                    .foregroundStyle(isHighlighted ? Theme.windowBackground.opacity(0.82) : Theme.tertiaryText)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(isHighlighted ? Theme.accent.opacity(0.22) : Color.clear)
         }
-        .buttonStyle(.plain)
+        .frame(height: 38)
+        .padding(.horizontal, 10)
+        .background(isHighlighted ? Theme.accent : Color.clear)
+        .contentShape(Rectangle())
         .onHover { isHovering in
             if isHovering {
                 onHighlight()
             }
         }
+        .onTapGesture(perform: onSelect)
     }
 
     private var detail: String? {
@@ -475,12 +506,17 @@ private struct SkillPickerDisabledRow: View {
     let text: String
 
     var body: some View {
-        Text(text)
-            .uiFont(size: 13, weight: .medium)
-            .foregroundStyle(Theme.tertiaryText)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(Theme.tertiaryText)
+            Text(text)
+                .uiFont(size: 13)
+                .foregroundStyle(Theme.tertiaryText)
+                .lineLimit(1)
+            Spacer()
+        }
+        .frame(height: 38)
+        .padding(.horizontal, 10)
     }
 }
 
@@ -495,20 +531,31 @@ struct MentionPickerView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        Group {
             if state.status == .ready {
-                ForEach(state.results) { result in
-                    MentionPickerRow(
-                        result: result,
-                        isHighlighted: result.id == state.highlightedResultID
-                    )
-                    .onHover { isHovering in
-                        if isHovering {
-                            onHover(result.id)
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical, showsIndicators: true) {
+                        VStack(spacing: 0) {
+                            ForEach(state.results) { result in
+                                MentionPickerRow(
+                                    result: result,
+                                    isHighlighted: result.id == state.highlightedResultID
+                                )
+                                .id(result.id)
+                                .onHover { isHovering in
+                                    if isHovering {
+                                        onHover(result.id)
+                                    }
+                                }
+                                .onTapGesture {
+                                    onSelect(result.id)
+                                }
+                            }
                         }
                     }
-                    .onTapGesture {
-                        onSelect(result.id)
+                    .onChange(of: state.highlightedResultID) { _, highlightedID in
+                        guard let highlightedID else { return }
+                        proxy.scrollTo(highlightedID)
                     }
                 }
             } else {
