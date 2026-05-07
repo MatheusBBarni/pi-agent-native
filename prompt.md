@@ -18,9 +18,9 @@ Principles:
 
 Stage agent: engineer
 
-You are working on GitHub issue #15: Add keymaps and keybindings.
+You are working on GitHub issue #1: Implement @ file add picker.
 
-Repository issue URL: https://github.com/MatheusBBarni/pi-agent-native/issues/15
+Repository issue URL: https://github.com/MatheusBBarni/pi-agent-native/issues/1
 Current project status: In progress
 Attempt: 
 

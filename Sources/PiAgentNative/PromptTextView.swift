@@ -8,6 +8,10 @@ struct PromptTextView: NSViewRepresentable {
     var placeholder: String
     var fontSize = 15.0
     var isEditable = true
+    var pendingTextReplacement: MentionTextReplacement?
+    var onTextReplacementApplied: (UUID) -> Void = { _ in }
+    var onSelectionChange: (NSRange) -> Void = { _ in }
+    var onMentionCommand: (MentionPickerCommand) -> Bool = { _ in false }
     var onSubmit: () -> Void
     var onCycleReasoning: () -> Void
     var onControlKey: (ComposerControlKey) -> Bool = { _ in false }
@@ -17,6 +21,7 @@ struct PromptTextView: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.onSubmit = onSubmit
         textView.onCycleReasoning = onCycleReasoning
+        textView.onMentionCommand = onMentionCommand
         textView.onControlKey = onControlKey
         textView.placeholder = placeholder
         textView.isEditable = isEditable
@@ -44,6 +49,7 @@ struct PromptTextView: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? SubmitTextView else { return }
+        context.coordinator.onSelectionChange = onSelectionChange
         if textView.string != text {
             textView.string = text
         }
@@ -59,15 +65,28 @@ struct PromptTextView: NSViewRepresentable {
         }
         textView.onSubmit = onSubmit
         textView.onCycleReasoning = onCycleReasoning
+        textView.onMentionCommand = onMentionCommand
         textView.onControlKey = onControlKey
         textView.placeholder = placeholder
         textView.font = .systemFont(ofSize: fontSize)
         textView.isEditable = isEditable
+
+        if let pendingTextReplacement,
+           context.coordinator.appliedReplacementID != pendingTextReplacement.id {
+            context.coordinator.apply(pendingTextReplacement, to: textView)
+            onTextReplacementApplied(pendingTextReplacement.id)
+            textView.needsDisplay = true
+            return
+        }
+
+        if textView.string != text {
+            textView.string = text
+        }
         textView.needsDisplay = true
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, selectedRange: $selectedRange)
+        Coordinator(text: $text, selectedRange: $selectedRange, onSelectionChange: onSelectionChange)
     }
 
     static func clampedSelectedRange(_ range: NSRange, textLength: Int) -> NSRange {
@@ -80,23 +99,51 @@ struct PromptTextView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         @Binding var text: String
         @Binding var selectedRange: NSRange
+        var onSelectionChange: (NSRange) -> Void
+        var appliedReplacementID: UUID?
         var lastFocusRequest = 0
 
-        init(text: Binding<String>, selectedRange: Binding<NSRange>) {
+        init(
+            text: Binding<String>,
+            selectedRange: Binding<NSRange>,
+            onSelectionChange: @escaping (NSRange) -> Void
+        ) {
             _text = text
             _selectedRange = selectedRange
+            self.onSelectionChange = onSelectionChange
         }
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             text = textView.string
             selectedRange = textView.selectedRange()
+            onSelectionChange(textView.selectedRange())
             textView.needsDisplay = true
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             selectedRange = textView.selectedRange()
+            onSelectionChange(textView.selectedRange())
+        }
+
+        func apply(_ replacement: MentionTextReplacement, to textView: NSTextView) {
+            let utf16Count = textView.string.utf16.count
+            guard replacement.range.location >= 0,
+                  replacement.range.length >= 0,
+                  replacement.range.location + replacement.range.length <= utf16Count
+            else { return }
+
+            appliedReplacementID = replacement.id
+            guard textView.shouldChangeText(in: replacement.range, replacementString: replacement.text) else {
+                return
+            }
+            textView.textStorage?.replaceCharacters(in: replacement.range, with: replacement.text)
+            textView.didChangeText()
+            textView.setSelectedRange(NSRange(
+                location: replacement.range.location + (replacement.text as NSString).length,
+                length: 0
+            ))
         }
     }
 }
@@ -104,11 +151,17 @@ struct PromptTextView: NSViewRepresentable {
 final class SubmitTextView: NSTextView {
     var onSubmit: (() -> Void)?
     var onCycleReasoning: (() -> Void)?
+    var onMentionCommand: ((MentionPickerCommand) -> Bool)?
     var onControlKey: ((ComposerControlKey) -> Bool)?
     var placeholder = ""
 
     override func keyDown(with event: NSEvent) {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+        if let command = MentionPickerCommand(event: event),
+           onMentionCommand?(command) == true {
+            return
+        }
 
         if event.keyCode == 126, onControlKey?(.up) == true {
             return
@@ -154,5 +207,33 @@ final class SubmitTextView: NSTextView {
             .foregroundColor: NSColor(Theme.tertiaryText)
         ]
         placeholder.draw(at: NSPoint(x: 0, y: 0), withAttributes: attributes)
+    }
+}
+
+enum MentionPickerCommand {
+    case moveUp
+    case moveDown
+    case insertHighlighted
+    case dismiss
+
+    init?(event: NSEvent) {
+        var modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        modifiers.remove(.capsLock)
+        modifiers.remove(.numericPad)
+        modifiers.remove(.function)
+        guard modifiers.isEmpty else { return nil }
+
+        switch event.keyCode {
+        case 126:
+            self = .moveUp
+        case 125:
+            self = .moveDown
+        case 36, 48, 76:
+            self = .insertHighlighted
+        case 53:
+            self = .dismiss
+        default:
+            return nil
+        }
     }
 }
