@@ -14,6 +14,7 @@ struct ChatMessage: Identifiable, Equatable {
     var title: String
     var text: String
     var thinking: String
+    var contentBlocks: [MessageContentBlock]
     var timestamp: Date
     var isStreaming: Bool
 
@@ -23,6 +24,7 @@ struct ChatMessage: Identifiable, Equatable {
         title: String = "",
         text: String,
         thinking: String = "",
+        contentBlocks: [MessageContentBlock]? = nil,
         timestamp: Date = Date(),
         isStreaming: Bool = false
     ) {
@@ -31,8 +33,56 @@ struct ChatMessage: Identifiable, Equatable {
         self.title = title
         self.text = text
         self.thinking = thinking
+        self.contentBlocks = contentBlocks ?? Self.blocks(text: text, thinking: thinking)
         self.timestamp = timestamp
         self.isStreaming = isStreaming
+    }
+
+    mutating func appendText(_ delta: String) {
+        guard !delta.isEmpty else { return }
+        text += delta
+        appendOrMerge(.text(delta))
+    }
+
+    mutating func appendThinking(_ delta: String) {
+        guard !delta.isEmpty else { return }
+        thinking += delta
+        appendOrMerge(.thinking(delta))
+    }
+
+    mutating func replaceText(_ replacement: String, blocks: [MessageContentBlock]? = nil) {
+        text = replacement
+        contentBlocks = blocks ?? Self.blocks(text: replacement, thinking: thinking)
+    }
+
+    mutating func appendToolCall(_ call: ToolCallPresentation) {
+        contentBlocks.append(.toolCall(call))
+    }
+
+    mutating func appendToolResult(_ result: ToolResultPresentation) {
+        contentBlocks.append(.toolResult(result))
+    }
+
+    private mutating func appendOrMerge(_ block: MessageContentBlock) {
+        switch (contentBlocks.last, block) {
+        case (.text(let existing), .text(let delta)):
+            contentBlocks[contentBlocks.count - 1] = .text(existing + delta)
+        case (.thinking(let existing), .thinking(let delta)):
+            contentBlocks[contentBlocks.count - 1] = .thinking(existing + delta)
+        default:
+            contentBlocks.append(block)
+        }
+    }
+
+    private static func blocks(text: String, thinking: String) -> [MessageContentBlock] {
+        var blocks: [MessageContentBlock] = []
+        if !thinking.isEmpty {
+            blocks.append(.thinking(thinking))
+        }
+        if !text.isEmpty {
+            blocks.append(.text(text))
+        }
+        return blocks
     }
 }
 
@@ -65,13 +115,66 @@ struct EventLog: Identifiable, Equatable {
     var timestamp: Date = Date()
 }
 
+enum ToolActivityStatus: String, Codable, Equatable {
+    case queued
+    case running
+    case succeeded
+    case failed
+    case cancelled
+
+    var isRunning: Bool {
+        self == .queued || self == .running
+    }
+
+    var isError: Bool {
+        self == .failed || self == .cancelled
+    }
+}
+
 struct ToolActivity: Identifiable, Equatable {
     let id: String
+    var toolCallId: String
     var name: String
     var summary: String
     var output: String
+    var stdout: String
+    var stderr: String
+    var result: String
+    var status: ToolActivityStatus
     var isRunning: Bool
     var isError: Bool
+
+    init(
+        id: String,
+        toolCallId: String? = nil,
+        name: String,
+        summary: String,
+        output: String,
+        stdout: String = "",
+        stderr: String = "",
+        result: String = "",
+        status: ToolActivityStatus? = nil,
+        isRunning: Bool,
+        isError: Bool
+    ) {
+        self.id = id
+        self.toolCallId = toolCallId ?? id
+        self.name = name
+        self.summary = summary
+        self.output = output
+        self.stdout = stdout
+        self.stderr = stderr
+        self.result = result
+        self.status = status ?? (isRunning ? .running : (isError ? .failed : .succeeded))
+        self.isRunning = isRunning
+        self.isError = isError
+    }
+
+    mutating func updateStatus(_ status: ToolActivityStatus) {
+        self.status = status
+        isRunning = status.isRunning
+        isError = status.isError
+    }
 }
 
 struct PiModel: Identifiable, Equatable {
@@ -135,39 +238,6 @@ struct LoginProvider: Identifiable, Equatable, Hashable {
 }
 
 extension LoginProvider {
-    static let subscriptionProviders: [LoginProvider] = [
-        LoginProvider(id: "anthropic", name: "Anthropic"),
-        LoginProvider(id: "openai-codex", name: "ChatGPT / OpenAI Codex"),
-        LoginProvider(id: "github-copilot", name: "GitHub Copilot")
-    ]
-
-    static let apiKeyProviders: [LoginProvider] = [
-        LoginProvider(id: "anthropic", name: "Anthropic"),
-        LoginProvider(id: "openai", name: "OpenAI"),
-        LoginProvider(id: "google", name: "Google Gemini"),
-        LoginProvider(id: "openrouter", name: "OpenRouter"),
-        LoginProvider(id: "amazon-bedrock", name: "Amazon Bedrock"),
-        LoginProvider(id: "azure-openai-responses", name: "Azure OpenAI Responses"),
-        LoginProvider(id: "deepseek", name: "DeepSeek"),
-        LoginProvider(id: "xai", name: "xAI"),
-        LoginProvider(id: "groq", name: "Groq"),
-        LoginProvider(id: "cerebras", name: "Cerebras"),
-        LoginProvider(id: "mistral", name: "Mistral"),
-        LoginProvider(id: "zai", name: "ZAI"),
-        LoginProvider(id: "moonshotai", name: "Moonshot AI"),
-        LoginProvider(id: "huggingface", name: "Hugging Face"),
-        LoginProvider(id: "fireworks", name: "Fireworks"),
-        LoginProvider(id: "vercel-ai-gateway", name: "Vercel AI Gateway"),
-        LoginProvider(id: "cloudflare-ai-gateway", name: "Cloudflare AI Gateway"),
-        LoginProvider(id: "cloudflare-workers-ai", name: "Cloudflare Workers AI"),
-        LoginProvider(id: "opencode", name: "OpenCode Zen"),
-        LoginProvider(id: "opencode-go", name: "OpenCode Go"),
-        LoginProvider(id: "kimi-coding", name: "Kimi For Coding"),
-        LoginProvider(id: "minimax", name: "MiniMax"),
-        LoginProvider(id: "minimax-cn", name: "MiniMax (China)"),
-        LoginProvider(id: "xiaomi", name: "Xiaomi MiMo"),
-        LoginProvider(id: "xiaomi-token-plan-cn", name: "Xiaomi MiMo Token Plan (China)"),
-        LoginProvider(id: "xiaomi-token-plan-ams", name: "Xiaomi MiMo Token Plan (Amsterdam)"),
-        LoginProvider(id: "xiaomi-token-plan-sgp", name: "Xiaomi MiMo Token Plan (Singapore)")
-    ]
+    static let subscriptionProviders = LoginProviderCatalog.subscriptionProviders
+    static let apiKeyProviders = LoginProviderCatalog.apiKeyProviders
 }

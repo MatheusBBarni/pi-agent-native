@@ -612,16 +612,6 @@ struct MessageBubbleView: View {
                 }
             }
 
-            if !message.thinking.isEmpty {
-                Text(message.thinking)
-                    .uiFont(size: 12)
-                    .foregroundStyle(Theme.tertiaryText)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.elevatedBackground.opacity(0.65))
-                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-            }
-
             if message.role == .user {
                 Text(messageText)
                     .uiFont(size: 15)
@@ -631,7 +621,16 @@ struct MessageBubbleView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                MarkdownMessageText(text: messageText)
+                let blocks = visibleBlocks
+                if blocks.isEmpty {
+                    MarkdownMessageText(text: messageText)
+                } else {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                            MessageContentBlockView(block: block)
+                        }
+                    }
+                }
             }
         }
         .padding(14)
@@ -651,6 +650,120 @@ struct MessageBubbleView: View {
 
     private var messageText: String {
         message.text.isEmpty ? "Working..." : message.text
+    }
+
+    private var visibleBlocks: [MessageContentBlock] {
+        message.contentBlocks.filter { !$0.isEmpty }
+    }
+}
+
+private struct MessageContentBlockView: View {
+    let block: MessageContentBlock
+
+    var body: some View {
+        switch block {
+        case .text(let text):
+            MarkdownMessageText(text: text)
+        case .thinking(let text):
+            DisclosureGroup {
+                Text(text)
+                    .uiFont(size: 12)
+                    .foregroundStyle(Theme.tertiaryText)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 6)
+            } label: {
+                Label("Thinking", systemImage: "brain.head.profile")
+                    .uiFont(size: 12, weight: .medium)
+                    .foregroundStyle(Theme.tertiaryText)
+            }
+            .padding(10)
+            .background(Theme.elevatedBackground.opacity(0.65))
+            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        case .toolCall(let call):
+            InlineToolCallView(call: call)
+        case .toolResult(let result):
+            InlineToolResultView(result: result)
+        case .image(let image):
+            Text(image.altText ?? image.url.absoluteString)
+                .uiFont(size: 12)
+                .foregroundStyle(Theme.tertiaryText)
+        }
+    }
+}
+
+private struct InlineToolCallView: View {
+    @State private var isExpanded = false
+    let call: ToolCallPresentation
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: call.status.isRunning ? "circle.dotted" : "hammer")
+                .frame(width: 18)
+                .foregroundStyle(call.status.isError ? Theme.red : Theme.accent)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(call.name)
+                        .uiFont(size: 12, weight: .semibold)
+                        .foregroundStyle(Theme.secondaryText)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 0)
+
+                    if !call.argumentsSummary.isEmpty {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.16)) {
+                                isExpanded.toggle()
+                            }
+                        } label: {
+                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                .uiFont(size: 11, weight: .semibold)
+                                .foregroundStyle(Theme.tertiaryText)
+                                .frame(width: 24, height: 24)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(isExpanded ? "Collapse tool message" : "Expand tool message")
+                        .accessibilityLabel(isExpanded ? "Collapse tool message" : "Expand tool message")
+                    }
+                }
+
+                if !call.argumentsSummary.isEmpty {
+                    Text(call.argumentsSummary)
+                        .uiFont(size: 11, design: .monospaced)
+                        .foregroundStyle(Theme.tertiaryText)
+                        .lineLimit(isExpanded ? nil : 2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(Theme.elevatedBackground.opacity(0.7))
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+}
+
+private struct InlineToolResultView: View {
+    let result: ToolResultPresentation
+
+    var body: some View {
+        DisclosureGroup {
+            Text(result.text)
+                .uiFont(size: 11, design: .monospaced)
+                .foregroundStyle(Theme.tertiaryText)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 6)
+        } label: {
+            Label(result.isError ? "Tool failed" : "Tool output", systemImage: result.isError ? "xmark.circle" : "terminal")
+                .uiFont(size: 12, weight: .medium)
+                .foregroundStyle(result.isError ? Theme.red : Theme.secondaryText)
+        }
+        .padding(10)
+        .background(Theme.elevatedBackground.opacity(0.65))
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
 }
 

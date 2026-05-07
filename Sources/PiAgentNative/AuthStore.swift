@@ -64,7 +64,7 @@ final class OAuthLoginRunner: ObservableObject {
         exitStatus = nil
         lastURL = nil
 
-        let command = oauthCommand(providerID: provider.id)
+        let command = OAuthLoginService.command(providerID: provider.id)
         let process = Process()
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()
@@ -76,7 +76,7 @@ final class OAuthLoginRunner: ObservableObject {
         process.standardInput = stdinPipe
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
-        process.environment = processEnvironment()
+        process.environment = OAuthLoginService.processEnvironment()
 
         let consume: (FileHandle) -> Void = { [weak self] handle in
             let data = handle.availableData
@@ -140,31 +140,4 @@ final class OAuthLoginRunner: ObservableObject {
         return detector.firstMatch(in: text, range: range)?.url
     }
 
-    private func oauthCommand(providerID: String) -> (executableURL: URL, arguments: [String], display: String) {
-        let aiDistCLI = PiLaunchResolver.piMonoURL
-            .appendingPathComponent("packages/ai/dist/cli.js")
-            .path
-        if FileManager.default.fileExists(atPath: aiDistCLI) {
-            return (URL(fileURLWithPath: "/usr/bin/env"), ["node", aiDistCLI, "login", providerID], "node \(aiDistCLI) login \(providerID)")
-        }
-
-        let tsx = PiLaunchResolver.piMonoURL
-            .appendingPathComponent("node_modules/.bin/tsx")
-            .path
-        let aiSourceCLI = PiLaunchResolver.piMonoURL
-            .appendingPathComponent("packages/ai/src/cli.ts")
-            .path
-        if FileManager.default.isExecutableFile(atPath: tsx), FileManager.default.fileExists(atPath: aiSourceCLI) {
-            return (URL(fileURLWithPath: tsx), [aiSourceCLI, "login", providerID], "\(tsx) \(aiSourceCLI) login \(providerID)")
-        }
-
-        return (URL(fileURLWithPath: "/usr/bin/env"), ["npx", "-y", "@mariozechner/pi-ai", "login", providerID], "npx -y @mariozechner/pi-ai login \(providerID)")
-    }
-
-    private func processEnvironment() -> [String: String] {
-        var environment = ProcessInfo.processInfo.environment
-        let basePath = environment["PATH"] ?? ""
-        environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:\(basePath)"
-        return environment
-    }
 }

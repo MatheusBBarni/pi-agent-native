@@ -1,10 +1,9 @@
 import AppKit
+import Combine
 import Foundation
 
 @MainActor
 public final class AppModel: ObservableObject {
-    @Published var workspacePath: String
-    @Published var customExecutablePath: String
     @Published var sessionTitle = "New chat"
     @Published var composerText = ""
     @Published var statusText = "Disconnected"
@@ -16,9 +15,6 @@ public final class AppModel: ObservableObject {
     @Published var modelName = "No model"
     @Published var thinkingLevel = "medium"
     @Published var pendingMessageCount = 0
-    @Published var messages: [ChatMessage] = []
-    @Published var eventLog: [EventLog] = []
-    @Published var tools: [ToolActivity] = []
     @Published var availableModels: [PiModel] = []
     @Published var availableSkills: [AvailableSkill] = []
     @Published var skillAvailability: SkillAvailability = .notLoaded
@@ -49,19 +45,22 @@ public final class AppModel: ObservableObject {
         }
     }
     @Published var gitDetails = GitBranchDetails()
-    @Published var projects: [ProjectItem]
-    @Published var selectedProjectID: ProjectItem.ID?
-    @Published var expandedProjectIDs: Set<ProjectItem.ID> = []
-    @Published var sessions: [StoredSession]
-    @Published var selectedSessionID: StoredSession.ID?
     @Published var mentionPickerState: MentionPickerState?
     @Published var pendingMentionTextReplacement: MentionTextReplacement?
-    @Published var availableExternalTargets: [AvailableExternalTarget] = []
+
+    let conversationStore: ConversationStore
+    let toolActivityStore: ToolActivityStore
+    let processLogStore: ProcessLogStore
+    let workspaceStore: WorkspaceStore
+    let sessionIndexStore: NativeSessionIndexStore
+    let settingsStore: SettingsStore
+    let extensionUIRouter = ExtensionUIRouter()
 
     var externalTargetLauncher: ExternalTargetLaunchAction = ExternalTargetLauncher.launch
 
     private let client = PiRPCClient()
-    private var currentAssistantID: UUID?
+    private let reducer = PiRPCEventReducer()
+    private var storeCancellables: Set<AnyCancellable> = []
     private var shouldSwitchToStoredSessionAfterStart = true
     private var isCreatingNewSession = false
     private var isSwitchingSession = false
@@ -69,6 +68,61 @@ public final class AppModel: ObservableObject {
     private var mentionIndexCache: [String: [MentionIndexEntry]] = [:]
     private var mentionIndexTask: Task<Void, Never>?
     private var mentionIndexLoadingProjectPath: String?
+
+    var workspacePath: String {
+        get { workspaceStore.workspacePath }
+        set { workspaceStore.workspacePath = newValue }
+    }
+
+    var customExecutablePath: String {
+        get { settingsStore.customExecutablePath }
+        set { settingsStore.customExecutablePath = newValue }
+    }
+
+    var messages: [ChatMessage] {
+        get { conversationStore.messages }
+        set { conversationStore.messages = newValue }
+    }
+
+    var eventLog: [EventLog] {
+        get { processLogStore.eventLog }
+        set { processLogStore.eventLog = newValue }
+    }
+
+    var tools: [ToolActivity] {
+        get { toolActivityStore.tools }
+        set { toolActivityStore.tools = newValue }
+    }
+
+    var projects: [ProjectItem] {
+        get { workspaceStore.projects }
+        set { workspaceStore.projects = newValue }
+    }
+
+    var selectedProjectID: ProjectItem.ID? {
+        get { workspaceStore.selectedProjectID }
+        set { workspaceStore.selectedProjectID = newValue }
+    }
+
+    var expandedProjectIDs: Set<ProjectItem.ID> {
+        get { workspaceStore.expandedProjectIDs }
+        set { workspaceStore.expandedProjectIDs = newValue }
+    }
+
+    var sessions: [StoredSession] {
+        get { sessionIndexStore.sessions }
+        set { sessionIndexStore.sessions = newValue }
+    }
+
+    var selectedSessionID: StoredSession.ID? {
+        get { sessionIndexStore.selectedSessionID }
+        set { sessionIndexStore.selectedSessionID = newValue }
+    }
+
+    var availableExternalTargets: [AvailableExternalTarget] {
+        get { workspaceStore.availableExternalTargets }
+        set { workspaceStore.availableExternalTargets = newValue }
+    }
 
     public init() {
         let storedExecutable = UserDefaults.standard.string(forKey: "customExecutablePath")
@@ -80,35 +134,38 @@ public final class AppModel: ObservableObject {
         let persistedProjects = persistedState.projects
         let persistedSessions = persistedState.sessions
 
-        customExecutablePath = storedExecutable ?? ""
+        settingsStore = SettingsStore(customExecutablePath: storedExecutable ?? "")
+        workspaceStore = WorkspaceStore(
+            projects: persistedProjects,
+            selectedProjectPath: persistedState.selectedProjectPath,
+            availableExternalTargets: ExternalTargetScanner().scan()
+        )
+        sessionIndexStore = NativeSessionIndexStore(
+            sessions: persistedSessions,
+            selectedSessionID: persistedState.selectedSessionID
+        )
+        conversationStore = ConversationStore()
+        toolActivityStore = ToolActivityStore()
+        processLogStore = ProcessLogStore()
+
         uiFontSize = min(max(storedFontSize ?? 15, 12), 20)
         themeFamily = storedThemeFamily ?? .nord
         themeVariant = storedThemeVariant ?? legacyThemeMode ?? .dark
-        projects = persistedProjects
-        sessions = persistedSessions
-        if let selectedProjectPath = persistedState.selectedProjectPath,
-           let selectedProject = persistedProjects.first(where: { $0.path == selectedProjectPath }) {
-            selectedProjectID = selectedProject.id
-            workspacePath = selectedProject.path
-        } else {
-            selectedProjectID = nil
-            workspacePath = ""
-        }
-        if let selectedProjectID {
-            expandedProjectIDs.insert(selectedProjectID)
-        }
-        selectedSessionID = persistedState.selectedSessionID
+
         if let selectedProjectPath = persistedState.selectedProjectPath,
            selectedProjectID != nil {
             let selectedSession = selectedSessionID.flatMap { id in
                 persistedSessions.first { $0.id == id }
             }
             if selectedSession?.projectPath != selectedProjectPath {
-                selectedSessionID = Self.lastOpenedSession(in: persistedSessions, projectPath: selectedProjectPath)?.id
+                selectedSessionID = NativeSessionIndexStore.lastOpenedSession(
+                    in: persistedSessions,
+                    projectPath: selectedProjectPath
+                )?.id
             }
         }
+        bindStoreChanges()
         refreshGitDetails()
-        availableExternalTargets = ExternalTargetScanner().scan()
 
         client.onEvent = { [weak self] event in
             self?.handleRPCEvent(event)
@@ -127,6 +184,25 @@ public final class AppModel: ObservableObject {
             self?.statusText = status == 0 ? "Stopped" : "Exited with status \(status)"
             self?.appendLog(title: "process exited", detail: "status \(status)")
         }
+    }
+
+    private func bindStoreChanges() {
+        relayStoreChanges(from: conversationStore)
+        relayStoreChanges(from: toolActivityStore)
+        relayStoreChanges(from: processLogStore)
+        relayStoreChanges(from: workspaceStore)
+        relayStoreChanges(from: sessionIndexStore)
+        relayStoreChanges(from: settingsStore)
+        relayStoreChanges(from: extensionUIRouter)
+    }
+
+    private func relayStoreChanges<Store: ObservableObject>(from store: Store) {
+        store.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &storeCancellables)
     }
 
     var skillPickerState: SkillPickerState? {
@@ -181,14 +257,14 @@ public final class AppModel: ObservableObject {
             statusText = "Connected"
             launchDetail = "\(launch.displayName): \(launch.diagnostic)"
             appendLog(title: "started pi rpc", detail: "\(launch.diagnostic) --mode rpc")
-            sendCommand(["id": requestID(), "type": "get_state"])
-            sendCommand(["id": requestID(), "type": "get_available_models"])
-            sendCommand(["id": requestID(), "type": "get_commands"])
+            sendCommand(.getState())
+            sendCommand(.getAvailableModels())
+            sendCommand(.getCommands())
             if shouldSwitchToStoredSessionAfterStart,
                let selectedSession,
                !selectedSession.sessionFile.isEmpty {
                 shouldSwitchToStoredSessionAfterStart = false
-                sendCommand(["id": requestID(), "type": "switch_session", "sessionPath": selectedSession.sessionFile])
+                sendCommand(.switchSession(sessionPath: selectedSession.sessionFile))
             }
         } catch {
             isConnected = false
@@ -254,7 +330,7 @@ public final class AppModel: ObservableObject {
             pendingPromptAfterNewSession = rpcPrompt
             isCreatingNewSession = true
             isSwitchingSession = false
-            sendCommand(["id": requestID(), "type": "new_session"])
+            sendCommand(.newSession())
         } else {
             sendPromptCommand(rpcPrompt)
         }
@@ -267,9 +343,8 @@ public final class AppModel: ObservableObject {
         }
         persistCurrentSessionSnapshot()
         selectedSessionID = nil
-        messages.removeAll()
-        tools.removeAll()
-        currentAssistantID = nil
+        conversationStore.clear()
+        toolActivityStore.clear()
         sessionTitle = "New chat"
         statusText = isConnected ? "Ready" : statusText
         isCreatingNewSession = false
@@ -380,7 +455,8 @@ public final class AppModel: ObservableObject {
             isShowingSettings ||
             isShowingLogin ||
             isShowingModelPicker ||
-            isShowingProcessLog
+            isShowingProcessLog ||
+            extensionUIRouter.activeRequest != nil
     }
 
     func closeActiveModal() {
@@ -394,6 +470,8 @@ public final class AppModel: ObservableObject {
             isShowingModelPicker = false
         } else if isShowingProcessLog {
             isShowingProcessLog = false
+        } else if extensionUIRouter.activeRequest != nil {
+            cancelExtensionUIRequest()
         }
     }
 
@@ -403,14 +481,14 @@ public final class AppModel: ObservableObject {
     }
 
     func abort() {
-        sendCommand(["id": requestID(), "type": "abort"])
+        sendCommand(.abort())
     }
 
     func refreshState() {
-        sendCommand(["id": requestID(), "type": "get_state"])
-        sendCommand(["id": requestID(), "type": "get_session_stats"])
-        sendCommand(["id": requestID(), "type": "get_available_models"])
-        sendCommand(["id": requestID(), "type": "get_commands"])
+        sendCommand(.getState())
+        sendCommand(.getSessionStats())
+        sendCommand(.getAvailableModels())
+        sendCommand(.getCommands())
         refreshGitDetails()
     }
 
@@ -466,28 +544,19 @@ public final class AppModel: ObservableObject {
     func showModelPicker() {
         ensureConnected()
         isShowingModelPicker = true
-        sendCommand(["id": requestID(), "type": "get_available_models"])
+        sendCommand(.getAvailableModels())
     }
 
     func selectModel(_ model: PiModel) {
-        sendCommand([
-            "id": requestID(),
-            "type": "set_model",
-            "provider": model.provider,
-            "modelId": model.modelId
-        ])
+        sendCommand(.setModel(provider: model.provider, modelId: model.modelId))
     }
 
     func setThinkingLevel(_ level: String) {
-        sendCommand([
-            "id": requestID(),
-            "type": "set_thinking_level",
-            "level": level.lowercased()
-        ])
+        sendCommand(.setThinkingLevel(level))
     }
 
     func cycleThinkingLevel() {
-        sendCommand(["id": requestID(), "type": "cycle_thinking_level"])
+        sendCommand(.cycleThinkingLevel())
     }
 
     func saveAPIKey(provider: LoginProvider, apiKey: String) throws {
@@ -502,7 +571,7 @@ public final class AppModel: ObservableObject {
     }
 
     func selectProject(_ project: ProjectItem) {
-        if let lastSession = lastOpenedSession(for: project) {
+        if let lastSession = sessionIndexStore.lastOpenedSession(for: project) {
             switchSession(lastSession, expandProject: true)
             return
         }
@@ -514,13 +583,10 @@ public final class AppModel: ObservableObject {
         persistCurrentSessionSnapshot()
         let shouldRestart = isConnected && workspacePath != project.path
         resetMentionContext(invalidateProjectAt: project.path)
-        selectedProjectID = project.id
-        workspacePath = project.path
-        expandedProjectIDs.insert(project.id)
+        workspaceStore.select(project)
         selectedSessionID = nil
-        messages.removeAll()
-        tools.removeAll()
-        currentAssistantID = nil
+        conversationStore.clear()
+        toolActivityStore.clear()
         sessionTitle = "New chat"
         statusText = isConnected ? "Ready" : statusText
         isCreatingNewSession = false
@@ -535,24 +601,11 @@ public final class AppModel: ObservableObject {
     }
 
     func toggleProject(_ project: ProjectItem) {
-        if expandedProjectIDs.contains(project.id) {
-            expandedProjectIDs.remove(project.id)
-        } else {
-            expandedProjectIDs.insert(project.id)
-        }
+        workspaceStore.toggle(project)
     }
 
     func addProject(path: String) {
-        let url = URL(fileURLWithPath: path).standardizedFileURL
-        let path = url.path
-        let existing = projects.first { $0.path == path }
-        if let existing {
-            selectProject(existing)
-            return
-        }
-
-        let project = ProjectItem(name: url.lastPathComponent, path: path)
-        projects.append(project)
+        let project = workspaceStore.addProject(path: path)
         selectProject(project)
     }
 
@@ -578,11 +631,11 @@ public final class AppModel: ObservableObject {
     }
 
     var selectedProject: ProjectItem? {
-        projects.first { $0.id == selectedProjectID }
+        workspaceStore.selectedProject
     }
 
     var selectedSession: StoredSession? {
-        sessions.first { $0.id == selectedSessionID }
+        sessionIndexStore.selectedSession
     }
 
     func removePendingSkill(_ skill: AvailableSkill) {
@@ -630,16 +683,9 @@ public final class AppModel: ObservableObject {
     }
 
     func sessionsForProject(_ project: ProjectItem) -> [StoredSession] {
-        sessions
-            .filter { $0.projectPath == project.path }
-            .sorted { lhs, rhs in
-                let lhsIsRunning = isRunningSession(lhs)
-                let rhsIsRunning = isRunningSession(rhs)
-                if lhsIsRunning != rhsIsRunning {
-                    return lhsIsRunning
-                }
-                return lhs.updatedAt > rhs.updatedAt
-            }
+        sessionIndexStore.sessionsForProject(project, runningSessionID: selectedSessionID) { session in
+            isRunningSession(session)
+        }
     }
 
     private func refreshMentionPicker() {
@@ -811,24 +857,20 @@ public final class AppModel: ObservableObject {
         selectedSessionID = session.id
         sessionTitle = session.title
         statusText = session.status
-        if let index = sessions.firstIndex(where: { $0.id == session.id }) {
-            sessions[index].updatedAt = Date()
-        }
-        messages.removeAll()
-        currentAssistantID = nil
+        sessionIndexStore.touch(session)
+        conversationStore.clear()
         isSwitchingSession = true
         isCreatingNewSession = false
         if let project = projects.first(where: { $0.path == session.projectPath }) {
             if workspacePath != project.path {
                 resetMentionContext(invalidateProjectAt: project.path)
             }
-            selectedProjectID = project.id
+            workspaceStore.select(project, expand: false)
             if expandProject {
                 expandedProjectIDs.insert(project.id)
             } else {
                 expandedProjectIDs.remove(project.id)
             }
-            workspacePath = project.path
         }
         persistState()
         if isConnected && oldWorkspace != workspacePath {
@@ -836,18 +878,7 @@ public final class AppModel: ObservableObject {
         } else {
             ensureConnected()
         }
-        sendCommand(["id": requestID(), "type": "switch_session", "sessionPath": session.sessionFile])
-    }
-
-    private func lastOpenedSession(for project: ProjectItem) -> StoredSession? {
-        Self.lastOpenedSession(in: sessions, projectPath: project.path)
-    }
-
-    private static func lastOpenedSession(in sessions: [StoredSession], projectPath: String) -> StoredSession? {
-        sessions
-            .filter { $0.projectPath == projectPath && !$0.sessionFile.isEmpty }
-            .sorted { $0.updatedAt > $1.updatedAt }
-            .first
+        sendCommand(.switchSession(sessionPath: session.sessionFile))
     }
 
     private func ensureConnected() {
@@ -906,7 +937,7 @@ public final class AppModel: ObservableObject {
         start()
     }
 
-    private func sendCommand(_ command: [String: Any]) {
+    private func sendCommand(_ command: PiRPCCommand) {
         do {
             try client.send(command)
         } catch {
@@ -915,84 +946,83 @@ public final class AppModel: ObservableObject {
     }
 
     private func sendPromptCommand(_ prompt: String) {
-        sendCommand([
-            "id": requestID(),
-            "type": "prompt",
-            "message": prompt
-        ])
+        sendCommand(.prompt(prompt))
     }
 
-    private func handleRPCEvent(_ event: [String: Any]) {
-        guard let type = event["type"] as? String else { return }
+    private func handleRPCEvent(_ event: PiRPCEvent) {
+        if case .response(let response) = event {
+            handleResponse(response)
+            return
+        }
 
-        switch type {
-        case "response":
-            handleResponse(event)
-        case "agent_start":
-            isStreaming = true
-            statusText = "Running"
-            beginAssistantIfNeeded()
-        case "agent_end":
-            isStreaming = false
-            finishCurrentAssistant()
-            statusText = "Ready"
+        let effects = reducer.reduce(event, conversation: conversationStore, tools: toolActivityStore)
+        effects.forEach(applyReducerEffect)
+    }
+
+    private func applyReducerEffect(_ effect: PiRPCEventReducerEffect) {
+        switch effect {
+        case .setStreaming(let value):
+            isStreaming = value
+            statusText = value ? "Running" : "Ready"
+        case .setCompacting(let value):
+            isCompacting = value
+        case .setPendingMessageCount(let count):
+            pendingMessageCount = count
+        case .appendLog(let title, let detail):
+            appendLog(title: title, detail: detail)
+        case .refreshState:
             refreshState()
-        case "message_start":
-            handleMessageStart(event)
-        case "message_update":
-            handleMessageUpdate(event)
-        case "message_end":
-            handleMessageEnd(event)
-        case "tool_execution_start":
-            handleToolStart(event)
-        case "tool_execution_update":
-            handleToolUpdate(event)
-        case "tool_execution_end":
-            handleToolEnd(event)
-        case "queue_update":
-            handleQueueUpdate(event)
-        case "compaction_start":
-            isCompacting = true
-            appendLog(title: "compaction", detail: "started")
-        case "compaction_end":
-            isCompacting = false
-            appendLog(title: "compaction", detail: stringValue(event["errorMessage"]) ?? "completed")
-        case "extension_ui_request":
-            appendLog(title: "extension ui", detail: stringValue(event["method"]) ?? "request")
-        case "extension_error":
-            appendLog(title: "extension error", detail: stringValue(event["error"]) ?? "unknown error")
-        default:
-            appendLog(title: type, detail: compactJSON(event))
+        case .extensionUIRequest(let request):
+            handleExtensionUIRequest(request)
         }
     }
 
-    private func handleResponse(_ event: [String: Any]) {
-        let command = stringValue(event["command"]) ?? "response"
-        let success = event["success"] as? Bool ?? false
-        if !success {
+    private func handleExtensionUIRequest(_ request: PiExtensionUIRequest) {
+        appendLog(title: "extension ui", detail: request.methodName)
+        switch extensionUIRouter.route(request) {
+        case .command(let command):
+            sendCommand(command)
+        case .pendingDialog:
+            break
+        }
+    }
+
+    func submitExtensionUIRequest(result: Any?) {
+        guard let command = extensionUIRouter.resolveActiveRequest(with: result) else { return }
+        sendCommand(command)
+    }
+
+    func cancelExtensionUIRequest() {
+        guard let command = extensionUIRouter.rejectActiveRequest() else { return }
+        sendCommand(command)
+    }
+
+    private func handleResponse(_ response: PiRPCResponse) {
+        let command = response.command
+        if !response.success {
             if command == "get_commands" {
                 availableSkills = []
                 skillAvailability = .unavailable("Skills unavailable")
             }
-            appendLog(title: "\(command) failed", detail: stringValue(event["error"]) ?? "unknown error")
+            appendLog(title: "\(command) failed", detail: response.error ?? "unknown error")
             return
         }
 
-        if command == "get_state", let data = event["data"] as? [String: Any] {
+        if command == "get_state", let data = response.data {
             if let model = data["model"] as? [String: Any] {
-                let provider = stringValue(model["provider"]) ?? ""
-                let name = stringValue(model["name"]) ?? stringValue(model["id"]) ?? "Model"
+                let provider = PiRPCValue.string(model["provider"]) ?? ""
+                let name = PiRPCValue.string(model["name"]) ?? PiRPCValue.string(model["id"]) ?? "Model"
                 modelName = provider.isEmpty ? name : "\(provider)/\(name)"
             } else {
                 modelName = "No model"
             }
-            thinkingLevel = stringValue(data["thinkingLevel"]) ?? thinkingLevel
+            thinkingLevel = PiRPCValue.string(data["thinkingLevel"]) ?? thinkingLevel
             isStreaming = data["isStreaming"] as? Bool ?? isStreaming
             isCompacting = data["isCompacting"] as? Bool ?? isCompacting
             pendingMessageCount = data["pendingMessageCount"] as? Int ?? pendingMessageCount
             if isCreatingNewSession {
                 sessionTitle = firstPromptTitle ?? "New chat"
-            } else if let name = stringValue(data["sessionName"]), !name.isEmpty, !shouldReplaceGeneratedTitle(name) {
+            } else if let name = PiRPCValue.string(data["sessionName"]), !name.isEmpty, !shouldReplaceGeneratedTitle(name) {
                 sessionTitle = name
             } else if let selectedSession, !shouldReplaceGeneratedTitle(selectedSession.title) {
                 sessionTitle = selectedSession.title
@@ -1002,8 +1032,8 @@ public final class AppModel: ObservableObject {
                 sessionTitle = "New chat"
             }
             var didPersistSession = false
-            if let sessionID = stringValue(data["sessionId"]),
-               let sessionFile = stringValue(data["sessionFile"]),
+            if let sessionID = PiRPCValue.string(data["sessionId"]),
+               let sessionFile = PiRPCValue.string(data["sessionFile"]),
                shouldPersistStateSession(sessionID: sessionID) {
                 upsertSession(sessionID: sessionID, sessionFile: sessionFile)
                 didPersistSession = true
@@ -1015,44 +1045,44 @@ public final class AppModel: ObservableObject {
             selectedSessionID = nil
             sessionTitle = "New chat"
             statusText = "Ready"
-            currentAssistantID = nil
+            conversationStore.currentAssistantID = nil
             if let pendingPromptAfterNewSession {
                 self.pendingPromptAfterNewSession = nil
                 sendPromptCommand(pendingPromptAfterNewSession)
             } else {
-                messages.removeAll()
+                conversationStore.clear()
             }
             refreshState()
         } else if command == "switch_session" {
             isSwitchingSession = false
             refreshState()
-            sendCommand(["id": requestID(), "type": "get_messages"])
-        } else if command == "set_model", let data = event["data"] as? [String: Any] {
-            let provider = stringValue(data["provider"]) ?? ""
-            let name = stringValue(data["name"]) ?? stringValue(data["id"]) ?? "Model"
+            sendCommand(.getMessages())
+        } else if command == "set_model", let data = response.data {
+            let provider = PiRPCValue.string(data["provider"]) ?? ""
+            let name = PiRPCValue.string(data["name"]) ?? PiRPCValue.string(data["id"]) ?? "Model"
             modelName = provider.isEmpty ? name : "\(provider)/\(name)"
             appendLog(title: "selected model", detail: modelName)
             refreshState()
         } else if command == "set_thinking_level" {
             refreshState()
-        } else if command == "cycle_thinking_level", let data = event["data"] as? [String: Any] {
-            if let level = stringValue(data["level"]) {
+        } else if command == "cycle_thinking_level", let data = response.data {
+            if let level = PiRPCValue.string(data["level"]) {
                 thinkingLevel = level
             }
-        } else if command == "get_available_models", let data = event["data"] as? [String: Any] {
+        } else if command == "get_available_models", let data = response.data {
             let models = data["models"] as? [[String: Any]] ?? []
             availableModels = models.compactMap { model in
                 guard
-                    let provider = stringValue(model["provider"]),
-                    let modelId = stringValue(model["id"])
+                    let provider = PiRPCValue.string(model["provider"]),
+                    let modelId = PiRPCValue.string(model["id"])
                 else { return nil }
                 return PiModel(
                     provider: provider,
                     modelId: modelId,
-                    name: stringValue(model["name"]) ?? modelId
+                    name: PiRPCValue.string(model["name"]) ?? modelId
                 )
             }
-        } else if command == "get_commands", let data = event["data"] as? [String: Any] {
+        } else if command == "get_commands", let data = response.data {
             guard let commands = data["commands"] as? [[String: Any]] else {
                 availableSkills = []
                 skillAvailability = .unavailable("Skills unavailable")
@@ -1060,11 +1090,11 @@ public final class AppModel: ObservableObject {
             }
             availableSkills = SkillSelectionLogic.availableSkills(from: commands)
             skillAvailability = .loaded
-        } else if command == "get_session_stats", let data = event["data"] as? [String: Any] {
+        } else if command == "get_session_stats", let data = response.data {
             if let cost = data["cost"] as? Double {
                 appendLog(title: "session stats", detail: "cost $\(String(format: "%.4f", cost))")
             }
-        } else if command == "get_messages", let data = event["data"] as? [String: Any] {
+        } else if command == "get_messages", let data = response.data {
             let rpcMessages = data["messages"] as? [[String: Any]] ?? []
             messages = rpcMessages.compactMap(chatMessage(from:))
             if let firstPromptTitle {
@@ -1076,169 +1106,25 @@ public final class AppModel: ObservableObject {
         }
     }
 
-    private func handleMessageStart(_ event: [String: Any]) {
-        guard
-            let message = event["message"] as? [String: Any],
-            stringValue(message["role"]) == "assistant"
-        else { return }
-        beginAssistantIfNeeded()
-    }
-
-    private func handleMessageUpdate(_ event: [String: Any]) {
-        guard let delta = event["assistantMessageEvent"] as? [String: Any] else { return }
-        let deltaType = stringValue(delta["type"]) ?? "update"
-
-        switch deltaType {
-        case "text_delta":
-            appendAssistantText(stringValue(delta["delta"]) ?? "")
-        case "thinking_delta":
-            appendAssistantThinking(stringValue(delta["delta"]) ?? "")
-        case "toolcall_start":
-            appendLog(title: "tool call", detail: stringValue(delta["name"]) ?? "started")
-        case "toolcall_end":
-            if let toolCall = delta["toolCall"] as? [String: Any] {
-                appendLog(title: "tool call", detail: stringValue(toolCall["name"]) ?? "completed")
-            }
-        case "error":
-            appendAssistantText("\n\nError: \(stringValue(delta["error"]) ?? "unknown error")")
-        default:
-            break
-        }
-    }
-
-    private func handleMessageEnd(_ event: [String: Any]) {
-        guard
-            let message = event["message"] as? [String: Any],
-            stringValue(message["role"]) == "assistant"
-        else { return }
-
-        if let content = message["content"] {
-            let finalText = extractText(from: content)
-            if !finalText.isEmpty {
-                replaceCurrentAssistantText(finalText)
-            }
-        }
-        finishCurrentAssistant()
-    }
-
-    private func handleToolStart(_ event: [String: Any]) {
-        let id = stringValue(event["toolCallId"]) ?? requestID()
-        let name = stringValue(event["toolName"]) ?? "tool"
-        let args = event["args"] as? [String: Any]
-        let summary = stringValue(args?["command"]) ?? compactJSON(args ?? [:])
-        upsertTool(ToolActivity(id: id, name: name, summary: summary, output: "", isRunning: true, isError: false))
-    }
-
-    private func handleToolUpdate(_ event: [String: Any]) {
-        let id = stringValue(event["toolCallId"]) ?? ""
-        guard let index = tools.firstIndex(where: { $0.id == id }) else { return }
-        if let partial = event["partialResult"] as? [String: Any] {
-            tools[index].output = extractResultText(partial)
-        }
-    }
-
-    private func handleToolEnd(_ event: [String: Any]) {
-        let id = stringValue(event["toolCallId"]) ?? ""
-        guard let index = tools.firstIndex(where: { $0.id == id }) else { return }
-        tools[index].isRunning = false
-        tools[index].isError = event["isError"] as? Bool ?? false
-        if let result = event["result"] as? [String: Any] {
-            tools[index].output = extractResultText(result)
-        }
-    }
-
-    private func handleQueueUpdate(_ event: [String: Any]) {
-        let steering = event["steering"] as? [Any] ?? []
-        let followUp = event["followUp"] as? [Any] ?? []
-        pendingMessageCount = steering.count + followUp.count
-    }
-
-    private func beginAssistantIfNeeded() {
-        if let currentAssistantID, messages.contains(where: { $0.id == currentAssistantID }) {
-            return
-        }
-
-        let message = ChatMessage(role: .assistant, title: "π", text: "", isStreaming: true)
-        currentAssistantID = message.id
-        messages.append(message)
-    }
-
-    private func appendAssistantText(_ text: String) {
-        beginAssistantIfNeeded()
-        guard let currentAssistantID, let index = messages.firstIndex(where: { $0.id == currentAssistantID }) else { return }
-        messages[index].text += text
-        messages[index].isStreaming = true
-    }
-
-    private func appendAssistantThinking(_ text: String) {
-        beginAssistantIfNeeded()
-        guard let currentAssistantID, let index = messages.firstIndex(where: { $0.id == currentAssistantID }) else { return }
-        messages[index].thinking += text
-    }
-
-    private func replaceCurrentAssistantText(_ text: String) {
-        beginAssistantIfNeeded()
-        guard let currentAssistantID, let index = messages.firstIndex(where: { $0.id == currentAssistantID }) else { return }
-        messages[index].text = text
-    }
-
-    private func finishCurrentAssistant() {
-        guard let currentAssistantID, let index = messages.firstIndex(where: { $0.id == currentAssistantID }) else { return }
-        messages[index].isStreaming = false
-        if messages[index].text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            messages[index].text = "Finished without text output."
-        }
-        self.currentAssistantID = nil
-    }
-
-    private func upsertTool(_ activity: ToolActivity) {
-        if let index = tools.firstIndex(where: { $0.id == activity.id }) {
-            tools[index] = activity
-        } else {
-            tools.insert(activity, at: 0)
-        }
-    }
-
     private func appendLog(title: String, detail: String) {
-        guard !detail.isEmpty else { return }
-        eventLog.insert(EventLog(title: title, detail: detail), at: 0)
-        if eventLog.count > 80 {
-            eventLog.removeLast(eventLog.count - 80)
-        }
-    }
-
-    private func requestID() -> String {
-        UUID().uuidString
+        processLogStore.append(title: title, detail: detail)
     }
 
     private func persistCurrentSessionSnapshot() {
-        guard let selectedSessionID,
-              let index = sessions.firstIndex(where: { $0.id == selectedSessionID })
-        else { return }
-        sessions[index].title = sessionTitle
-        sessions[index].status = statusText
-        sessions[index].updatedAt = Date()
+        sessionIndexStore.updateSelectedSnapshot(title: sessionTitle, status: statusText)
         persistState()
     }
 
     private func upsertSession(sessionID: String, sessionFile: String) {
         guard let project = selectedProject else { return }
         let title = shouldReplaceGeneratedTitle(sessionTitle) ? (firstPromptTitle ?? "New chat") : sessionTitle
-        let session = StoredSession(
-            id: sessionID,
-            projectPath: project.path,
-            projectName: project.name,
+        sessionIndexStore.upsert(
+            sessionID: sessionID,
+            project: project,
             title: title,
             status: statusText,
-            sessionFile: sessionFile,
-            updatedAt: Date()
+            sessionFile: sessionFile
         )
-        if let index = sessions.firstIndex(where: { $0.id == sessionID }) {
-            sessions[index] = session
-        } else {
-            sessions.append(session)
-        }
-        selectedSessionID = sessionID
         persistState()
     }
 
@@ -1265,23 +1151,30 @@ public final class AppModel: ObservableObject {
     }
 
     private func chatMessage(from rpcMessage: [String: Any]) -> ChatMessage? {
-        guard let role = stringValue(rpcMessage["role"]) else { return nil }
+        guard let role = PiRPCValue.string(rpcMessage["role"]) else { return nil }
         switch role {
         case "user":
-            let text = extractText(from: rpcMessage["content"] ?? "")
-            return ChatMessage(role: .user, title: "You", text: SkillPromptDecorator.visibleUserPrompt(from: text))
+            let text = PiRPCValue.text(from: rpcMessage["content"] ?? "")
+            return ChatMessage(
+                role: .user,
+                title: "You",
+                text: SkillPromptDecorator.visibleUserPrompt(from: text)
+            )
         case "assistant":
-            return ChatMessage(role: .assistant, title: "π", text: extractText(from: rpcMessage["content"] ?? ""))
+            let content = rpcMessage["content"] ?? ""
+            return ChatMessage(
+                role: .assistant,
+                title: "π",
+                text: PiRPCValue.text(from: content),
+                contentBlocks: PiRPCValue.contentBlocks(from: content)
+            )
         default:
             return nil
         }
     }
 
     private var firstPromptTitle: String? {
-        messages
-            .first { $0.role == .user && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }?
-            .text
-            .truncatedSessionTitle()
+        conversationStore.firstPromptTitle
     }
 
     private func shouldReplaceGeneratedTitle(_ title: String) -> Bool {
@@ -1301,25 +1194,7 @@ public final class AppModel: ObservableObject {
 
         let workspace = workspacePath
         DispatchQueue.global(qos: .utility).async {
-            let branch = Self.runGit(["branch", "--show-current"], cwd: workspace)
-            let fallbackHead = Self.runGit(["rev-parse", "--short", "HEAD"], cwd: workspace)
-            let status = Self.runGit(["status", "--porcelain"], cwd: workspace)
-
-            let resolvedBranch: String
-            if let branch, !branch.isEmpty {
-                resolvedBranch = branch
-            } else if let fallbackHead, !fallbackHead.isEmpty {
-                resolvedBranch = "detached \(fallbackHead)"
-            } else {
-                resolvedBranch = "Not a git repository"
-            }
-
-            let changedLines = status?.split(separator: "\n").count ?? 0
-            let details = GitBranchDetails(
-                branch: resolvedBranch,
-                hasChanges: changedLines > 0,
-                changeSummary: changedLines > 0 ? "\(changedLines) changed file\(changedLines == 1 ? "" : "s")" : "No changes"
-            )
+            let details = GitService.branchDetails(for: workspace)
 
             DispatchQueue.main.async {
                 if self.workspacePath == workspace {
@@ -1329,80 +1204,4 @@ public final class AppModel: ObservableObject {
         }
     }
 
-    nonisolated private static func runGit(_ arguments: [String], cwd: String) -> String? {
-        let process = Process()
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git"] + arguments
-        process.currentDirectoryURL = URL(fileURLWithPath: cwd)
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return nil }
-            let data = stdout.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        } catch {
-            return nil
-        }
-    }
-
-    private func stringValue(_ value: Any?) -> String? {
-        if let value = value as? String { return value }
-        if let value { return "\(value)" }
-        return nil
-    }
-
-    private func extractText(from content: Any) -> String {
-        if let text = content as? String {
-            return text
-        }
-        guard let blocks = content as? [[String: Any]] else {
-            return ""
-        }
-        return blocks.compactMap { block in
-            if let text = block["text"] as? String { return text }
-            if let text = block["thinking"] as? String { return text }
-            if stringValue(block["type"]) == "toolCall" {
-                return "Tool: \(stringValue(block["name"]) ?? "unknown")"
-            }
-            return nil
-        }
-        .joined(separator: "\n\n")
-    }
-
-    private func extractResultText(_ result: [String: Any]) -> String {
-        guard let content = result["content"] as? [[String: Any]] else {
-            return compactJSON(result)
-        }
-        return content.compactMap { stringValue($0["text"]) }.joined(separator: "\n")
-    }
-
-    private func compactJSON(_ object: Any) -> String {
-        guard
-            JSONSerialization.isValidJSONObject(object),
-            let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
-            let text = String(data: data, encoding: .utf8)
-        else {
-            return "\(object)"
-        }
-        return text
-    }
-}
-
-private extension String {
-    func truncatedSessionTitle(limit: Int = 48) -> String {
-        let collapsed = trimmingCharacters(in: .whitespacesAndNewlines)
-            .components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-        guard collapsed.count > limit else {
-            return collapsed.isEmpty ? "New chat" : collapsed
-        }
-        let endIndex = collapsed.index(collapsed.startIndex, offsetBy: limit)
-        return String(collapsed[..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
-    }
 }

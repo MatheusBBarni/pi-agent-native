@@ -51,9 +51,62 @@ struct SettingsSheetView: View {
                     .frame(width: 160)
                 }
             }
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Pi executable")
+                    .uiFont(size: 13, weight: .medium)
+                    .foregroundStyle(Theme.secondaryText)
+
+                TextField("Custom executable path", text: customExecutableBinding)
+                    .textFieldStyle(.roundedBorder)
+
+                SettingsDiagnosticRow(title: "Validation", value: model.settingsStore.executableValidationMessage)
+                SettingsDiagnosticRow(title: "PI_MONO_PATH", value: model.settingsStore.piMonoPath)
+                SettingsDiagnosticRow(
+                    title: "Resolved command",
+                    value: "\(model.settingsStore.resolvedLaunchPreview.diagnostic) --mode rpc"
+                )
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("State directories")
+                    .uiFont(size: 13, weight: .medium)
+                    .foregroundStyle(Theme.secondaryText)
+
+                SettingsDiagnosticRow(title: "Sessions", value: model.settingsStore.sessionStorePath)
+                SettingsDiagnosticRow(title: "Auth", value: model.settingsStore.authDirectoryPath)
+            }
         }
         .padding(22)
-        .frame(width: 420)
+        .frame(width: 560)
         .background(Theme.windowBackground)
+    }
+
+    private var customExecutableBinding: Binding<String> {
+        Binding(
+            get: { model.customExecutablePath },
+            set: { model.customExecutablePath = $0 }
+        )
+    }
+}
+
+private struct SettingsDiagnosticRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+                .uiFont(size: 12, weight: .medium)
+                .foregroundStyle(Theme.tertiaryText)
+                .frame(width: 116, alignment: .leading)
+
+            Text(value)
+                .uiFont(size: 12, design: .monospaced)
+                .foregroundStyle(Theme.secondaryText)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+        }
     }
 }
