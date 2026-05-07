@@ -1,5 +1,5 @@
 ---
-title: Default Keymap and Keyboard Shortcut Design
+title: Default Keymap and Keybinding Design
 version: 1.0
 date_created: 2026-05-07
 last_updated: 2026-05-07
@@ -13,15 +13,15 @@ This specification defines the first-version keyboard interaction design for Pi 
 
 ## 1. Purpose & Scope
 
-This specification applies to Pi Agent Native's macOS app shell, sidebar commands, chat surface, composer, modals, and keyboard shortcut help surface.
+This specification applies to Pi Agent Native's macOS app shell, sidebar commands, chat surface, composer, modals, and Keybinding Help surface.
 
-The intended audience is implementation agents and maintainers adding first-version keybinding support. The implementation must centralize keybinding definitions so command handling, menus, hover help, and Keyboard Shortcuts help render from a shared source of truth.
+The intended audience is implementation agents and maintainers adding first-version keybinding support. The implementation must centralize keybinding definitions so command handling, menus, hover help, and Keybinding Help render from a shared source of truth.
 
 In scope:
 
 - Default Keymap only.
 - App-wide and focused keybindings.
-- Keyboard Shortcuts modal opened from the sidebar Help command.
+- Keybinding Help modal opened from the sidebar Help command.
 - Hover help for sidebar commands that have keybindings.
 - Sidebar and inspector pane toggles.
 - Escape behavior for modal dismissal and stop generation.
@@ -31,9 +31,9 @@ Out of scope:
 - User-editable keybinding customization.
 - Keybinding persistence.
 - Importing or exporting keymaps.
-- Project/session cycling shortcuts.
-- Command picker and file picker navigation shortcuts beyond standard platform behavior.
-- Operating-system-wide global shortcuts.
+- Project/session cycling keybindings.
+- Command picker and file picker navigation keybindings beyond standard platform behavior.
+- Operating-system-wide keybindings.
 
 ## 2. Definitions
 
@@ -72,14 +72,22 @@ Out of scope:
 - **REQ-011**: Escape shall close the active modal when a modal is open.
 - **REQ-012**: Escape shall stop generation when generation is streaming and no modal owns focus.
 - **REQ-013**: The implementation shall keep Start Pi RPC and Stop Pi RPC available as menu actions without default keybindings in the first version.
+- **REQ-014**: The implementation shall remove the current provisional Command-Shift-R Start/Stop Pi RPC keybinding and Command-Shift-N New Session keybinding.
+- **REQ-015**: Keybinding dispatch shall use exact modifier matching, except for platform-provided equivalent handling, so extra modifiers do not accidentally trigger focused composer actions.
+- **REQ-016**: Command-Return shall not stop generation. Escape is the only first-version default keybinding for Stop generation.
+- **REQ-017**: Modal Dismissal shall be dispatched before any app-wide or chat-level Escape action.
+- **REQ-018**: The implementation shall expose shared action dispatch helpers so sidebar buttons, menu commands, keybinding dispatch, and help labels call the same App Action behavior.
 - **CON-001**: User-customized keybinding editing is not part of this version.
 - **CON-002**: Keybinding persistence is not part of this version.
-- **CON-003**: Project/session cycling and command/file picker navigation shortcuts are deferred.
+- **CON-003**: Project/session cycling and command/file picker navigation keybindings are deferred.
 - **CON-004**: Composer text editing behavior must take precedence over conflicting Keybindings.
 - **CON-005**: The app must not steal standard text input gestures for text selection, deletion, cursor movement, paste, copy, cut, undo, redo, or newline insertion.
+- **CON-006**: Sidebar and inspector visibility state is runtime UI state for this issue; persisting pane visibility is out of scope.
 - **GUD-001**: Use standard macOS key equivalents where possible: Command-N for New chat, Command-O for Open project, Command-, for Settings.
 - **GUD-002**: Generate menu labels, hover help labels, and Keybinding Help rows from the centralized registry to avoid drift.
 - **PAT-001**: Model each keybinding record with an App Action identifier, user-facing action label, key equivalent, modifiers, scope, help group, and enabled-state rule.
+- **PAT-002**: Keep platform-local text handling inside `PromptTextView` for Return, Shift-Return, and Shift-Tab, but have it call shared App Action behavior rather than duplicating business logic.
+- **PAT-003**: Implement app-wide keybindings through SwiftUI commands where possible, and use a single window-level keyboard event bridge only for focused or priority-sensitive cases that SwiftUI commands cannot express reliably.
 
 ### Default Keymap
 
@@ -91,7 +99,7 @@ Out of scope:
 | Shell | Refresh state | Command-R | App-wide |
 | Shell | Open settings | Command-, | App-wide |
 | Shell | Open process log | Command-Shift-L | App-wide |
-| Shell | Open Keyboard Shortcuts | Command-/ | App-wide |
+| Shell | Open Keybinding Help | Command-/ | App-wide |
 | Shell | Toggle sidebar | Command-Option-S | App-wide |
 | Shell | Toggle inspector | Command-Option-I | App-wide |
 | Chat | Send prompt | Command-Return | Focused |
@@ -148,8 +156,20 @@ Required generated consumers:
 |---|---|
 | macOS menu commands | action title, key equivalent, modifiers, enabled state |
 | Sidebar hover help | action title, display label |
-| Keyboard Shortcuts modal | help group, action title, display label, scope |
-| Shortcut dispatch | action identifier, scope, enabled state |
+| Keybinding Help modal | help group, action title, display label, scope |
+| Keybinding dispatch | action identifier, scope, enabled state |
+
+Current code handoff:
+
+| Current surface | Existing state | Required issue 15 change |
+|---|---|---|
+| `PiAgentNativeApp` commands | `Command-Shift-R` toggles Pi RPC and `Command-Shift-N` creates a session | Replace provisional key equivalents with registry-backed menu commands; leave Start/Stop Pi RPC unbound |
+| `SidebarView` | Owns `openProject()` privately and hardcodes command labels | Move or wrap Open Project and other App Actions behind shared dispatch so menus and sidebar use the same behavior |
+| `SidebarCommand` | No hover help | Accept an optional `AppActionID` or registry definition and render `.help("{title} - {displayLabel}")` when a keybinding exists |
+| `AppShellView` | Always renders sidebar and inspector; custom modals have click-to-dismiss only | Add runtime pane visibility state and a modal-aware Escape dispatch path |
+| `ComposerView` | Send/stop button owns `Command-Return` and can abort while streaming | Remove abort behavior from the `Command-Return` keybinding; keep pointer click behavior for the stop button |
+| `PromptTextView` | Handles Return and Shift-Tab with broad modifier checks | Use exact modifier checks for Return, Shift-Return, and Shift-Tab and leave standard editing gestures to `NSTextView` |
+| `AppModel` | Contains action behavior but not keybinding metadata or modal close helper | Add small action helpers such as `closeActiveModal()`, `toggleSidebar()`, `toggleInspector()`, and action availability predicates |
 
 ## 5. Acceptance Criteria
 
@@ -162,12 +182,16 @@ Required generated consumers:
 - **AC-007**: Given generation is streaming and no modal is active, When the user presses Escape, Then generation is stopped.
 - **AC-008**: Given a modal is active, When the user presses Escape, Then the modal closes and generation is not stopped by the same key event.
 - **AC-009**: Given the user hovers the New chat Sidebar Command, Then hover help displays `New chat - Command-N`.
-- **AC-010**: Given the user clicks the Help Sidebar Command, Then Keyboard Shortcuts help opens.
-- **AC-011**: Given Keyboard Shortcuts help is open, When the user views it, Then all Default Keymap bindings are listed by group.
+- **AC-010**: Given the user clicks the Help Sidebar Command, Then Keybinding Help opens.
+- **AC-011**: Given Keybinding Help is open, When the user views it, Then all Default Keymap bindings are listed by group.
 - **AC-012**: Given the sidebar is visible, When the user presses Command-Option-S, Then the sidebar is hidden and the chat surface remains usable.
 - **AC-013**: Given the inspector is visible, When the user presses Command-Option-I, Then the inspector is hidden and the chat surface remains usable.
-- **AC-014**: Given text is selected in the composer, When the user uses standard macOS copy, paste, undo, redo, deletion, or cursor movement shortcuts, Then the text editor handles those gestures normally.
+- **AC-014**: Given text is selected in the composer, When the user uses standard macOS copy, paste, undo, redo, deletion, or cursor movement gestures, Then the text editor handles those gestures normally.
 - **AC-015**: Given the Pi menu is open, When the user views Start Pi RPC or Stop Pi RPC, Then those menu actions are present but have no first-version default keybinding.
+- **AC-016**: Given generation is streaming and the composer is focused, When the user presses Command-Return, Then generation is not stopped by that keybinding.
+- **AC-017**: Given the app menu is visible, When the user views New chat, Open project, Refresh state, Settings, Process log, and Keybinding Help, Then their displayed key equivalents match the Default Keymap registry.
+- **AC-018**: Given the app has the first-version Default Keymap, When duplicate detection runs, Then Escape for Modal Dismissal and Escape for Stop generation are accepted only because the dispatch priority makes them mutually exclusive.
+- **AC-019**: Given the user presses Command-Shift-N or Command-Shift-R, Then those provisional keybindings do not invoke New chat or Start/Stop Pi RPC.
 
 ## 6. Test Automation Strategy
 
@@ -176,11 +200,17 @@ Required generated consumers:
 - **Test Data Management**: Use a preview or test AppModel with seeded projects, sessions, streaming state, modal state, and composer text.
 - **CI/CD Integration**: Run Swift package build and available XCTest targets in the existing repository build workflow when tests are added.
 - **Coverage Requirements**: Unit tests should cover registry uniqueness, duplicate keybinding detection, expected display labels, and action availability rules.
+- **Recommended Tests**:
+  - Add a `PiAgentNativeCoreTests` target if no test target exists yet.
+  - Test that every first-version keybinding targets a known `AppActionID`, and that intentional multi-binding actions such as Send prompt are represented explicitly.
+  - Test that keybinding display labels match the menu/help labels for Command-N, Command-O, Command-L, Command-R, Command-,, Command-Shift-L, Command-/, Command-Option-S, Command-Option-I, Command-Return, Return, Shift-Return, Shift-Tab, and Escape.
+  - Test duplicate conflict detection by scope and priority, including the allowed Escape Modal Dismissal before Stop generation case.
+  - Test action availability rules for no selected project, empty composer, streaming, and active modal states.
 - **Performance Testing**: No dedicated performance tests are required. Keybinding dispatch must be synchronous and must not perform blocking IO.
 
 ## 7. Rationale & Context
 
-The first version prioritizes predictable native keyboard operation over customization. Default-only keybindings reduce implementation risk while still requiring a centralized registry so future customization can be added without replacing scattered shortcut handlers.
+The first version prioritizes predictable native keyboard operation over customization. Default-only keybindings reduce implementation risk while still requiring a centralized registry so future customization can be added without replacing scattered keybinding handlers.
 
 Focused keybindings protect the composer and standard macOS text editing. App-wide keybindings are limited to shell-level actions that users expect to work from most places in the active window. Modal Dismissal has priority over stop-generation behavior to prevent Escape from closing a modal and aborting an active run with one key event.
 
@@ -228,9 +258,18 @@ Settings - Command-,
 
 ```text
 Escape priority:
-1. If Keyboard Shortcuts help, settings, login, model picker, or process log is open, Escape closes that modal.
+1. If Keybinding Help, settings, login, model picker, or process log is open, Escape closes that modal.
 2. Else if generation is streaming, Escape stops generation.
 3. Else Escape is a no-op.
+```
+
+```text
+Exact composer modifier handling:
+1. Return with no modifiers submits the prompt.
+2. Shift-Return inserts a newline.
+3. Command-Return submits the prompt only through the explicit Command-Return keybinding and only when sending is available.
+4. Command-Return does not inherit the send/stop button toggle behavior while streaming.
+5. Shift-Tab cycles thinking level only when the composer owns focus and no picker or modal owns the interaction.
 ```
 
 ```text
@@ -241,13 +280,45 @@ Command-Shift-[ and Command-Shift-] must not be introduced for session navigatio
 ## 10. Validation Criteria
 
 - The Default Keymap has no duplicate keybinding conflicts within the same scope.
-- Every keybinding in the registry appears in Keyboard Shortcuts help.
+- Every keybinding in the registry appears in Keybinding Help.
 - Every Sidebar Command with a keybinding has hover help that matches the registry display label.
 - Standard composer text editing behavior works after keybinding implementation.
 - Sidebar and inspector visibility toggles do not reset project, session, composer, message, or streaming state.
 - Project/session cycling and command/file picker navigation are absent from the first Default Keymap.
+- Existing provisional keybindings Command-Shift-N and Command-Shift-R are removed.
+- Command-Return cannot abort generation; Escape remains the stop-generation keybinding.
+- The app builds with `swift build` and any added tests pass with `swift test`.
+- If the local sandbox blocks SwiftPM network or cache writes, rerun validation in a normal developer shell and record the blocker in the handoff.
 
-## 11. Related Specifications / Further Reading
+## 11. Engineer Handoff Plan
+
+1. Add a `KeybindingDefinition` registry in `Sources/PiAgentNative`, including `AppActionID`, scope, help group, display label generation, enabled-state metadata, and duplicate validation.
+2. Add small shared App Action helpers on `AppModel` or a thin action dispatcher for New chat, Open project, Focus composer, Refresh state, Open settings, Open process log, Open Keybinding Help, Toggle sidebar, Toggle inspector, Send prompt, Stop generation, Cycle thinking level, and Close active modal.
+3. Replace hardcoded SwiftUI `.keyboardShortcut` declarations in `PiAgentNativeApp` and `ComposerView` with registry-backed bindings where SwiftUI commands are appropriate.
+4. Add runtime state for sidebar visibility, inspector visibility, and Keybinding Help modal visibility; keep pane visibility persistence out of scope.
+5. Add focus plumbing to `PromptTextView` so Command-L can make the composer first responder without disturbing normal `NSTextView` editing.
+6. Tighten `SubmitTextView.keyDown(with:)` to exact focused composer bindings and leave all other key events to `super`.
+7. Render Keybinding Help from the registry grouped by Shell, Chat, Composer, and Navigation.
+8. Render Sidebar Command hover help from the registry and insert the Help Sidebar Command between Process log and Login.
+9. Add focused unit tests for registry labels, duplicate detection, action availability, and allowed Escape priority.
+10. Validate with `swift build` and `swift test`; then manually smoke-test keybindings in a macOS run because keyboard dispatch depends on AppKit/SwiftUI focus behavior.
+
+## 12. Loophole Review
+
+| Loophole | Fix in this strategy |
+|---|---|
+| The issue title could imply user-editable keymaps | Scope is Default Keymap only; persistence and customization are explicit non-goals |
+| "Global shortcut" could mean an OS-wide hotkey | Scope is App-Wide Keybinding inside the active app window only |
+| Existing Command-Shift-N and Command-Shift-R provisional keybindings conflict with the Default Keymap | They must be removed or left unbound as specified |
+| Escape can both close a modal and abort generation | Modal Dismissal has explicit priority and consumes the event |
+| SwiftUI button `Command-Return` can abort while streaming | Command-Return is constrained to Send prompt only; pointer stop remains separate |
+| AppKit composer currently accepts broad modifier combinations | Exact modifier matching is required for focused composer keybindings |
+| Sidebar/menu/help labels can drift | Registry-backed consumers are required |
+| Open Project logic is private to `SidebarView` | Shared App Action dispatch is required before menu keybindings are wired |
+| Pane toggles could accidentally reset app state | Acceptance and validation require project, session, composer, message, and streaming state preservation |
+| Tests may be skipped because the repo has no test target | The handoff explicitly calls for adding a focused test target |
+
+## 13. Related Specifications / Further Reading
 
 - [Pi Agent Native domain context](../CONTEXT.md)
 - [Native Pi Shell Architecture Improvements](../docs/improvements.md)

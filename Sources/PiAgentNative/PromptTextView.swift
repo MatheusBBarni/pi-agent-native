@@ -3,6 +3,7 @@ import AppKit
 
 struct PromptTextView: NSViewRepresentable {
     @Binding var text: String
+    var focusRequest: Int
     @Binding var selectedRange: NSRange
     var placeholder: String
     var fontSize = 15.0
@@ -50,6 +51,12 @@ struct PromptTextView: NSViewRepresentable {
         if textView.selectedRange() != safeSelectedRange {
             textView.setSelectedRange(safeSelectedRange)
         }
+        if context.coordinator.lastFocusRequest != focusRequest {
+            context.coordinator.lastFocusRequest = focusRequest
+            DispatchQueue.main.async {
+                scrollView.window?.makeFirstResponder(textView)
+            }
+        }
         textView.onSubmit = onSubmit
         textView.onCycleReasoning = onCycleReasoning
         textView.onControlKey = onControlKey
@@ -73,6 +80,7 @@ struct PromptTextView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         @Binding var text: String
         @Binding var selectedRange: NSRange
+        var lastFocusRequest = 0
 
         init(text: Binding<String>, selectedRange: Binding<NSRange>) {
             _text = text

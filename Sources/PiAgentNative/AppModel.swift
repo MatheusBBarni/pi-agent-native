@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 @MainActor
@@ -28,6 +29,10 @@ public final class AppModel: ObservableObject {
     @Published var isShowingLogin = false
     @Published var isShowingProcessLog = false
     @Published var isShowingSettings = false
+    @Published var isShowingKeybindingHelp = false
+    @Published var isSidebarVisible = true
+    @Published var isInspectorVisible = true
+    @Published var composerFocusRequest = 0
     @Published var uiFontSize: Double {
         didSet {
             UserDefaults.standard.set(uiFontSize, forKey: "uiFontSize")
@@ -266,6 +271,129 @@ public final class AppModel: ObservableObject {
         pendingPromptAfterNewSession = nil
         clearSkillSelectionState(clearAvailableSkills: false)
         persistState()
+    }
+
+    public func performAppAction(_ actionID: AppActionID) {
+        guard canPerformAppAction(actionID) else { return }
+
+        switch actionID {
+        case .newChat:
+            newSession()
+        case .openProject:
+            openProject()
+        case .focusComposer:
+            focusComposer()
+        case .refreshState:
+            refreshState()
+        case .openSettings:
+            isShowingSettings = true
+        case .openProcessLog:
+            isShowingProcessLog = true
+        case .openKeybindingHelp:
+            isShowingKeybindingHelp = true
+        case .toggleSidebar:
+            isSidebarVisible.toggle()
+        case .toggleInspector:
+            isInspectorVisible.toggle()
+        case .sendPrompt:
+            sendPrompt()
+        case .stopGeneration:
+            stopGeneration()
+        case .insertComposerNewline:
+            break
+        case .cycleThinkingLevel:
+            cycleThinkingLevel()
+        case .closeActiveModal:
+            closeActiveModal()
+        }
+    }
+
+    public func canPerformAppAction(_ actionID: AppActionID) -> Bool {
+        if hasActiveModal, actionID != .closeActiveModal {
+            return false
+        }
+
+        switch actionID {
+        case .newChat:
+            return selectedProject != nil
+        case .openProject, .focusComposer, .openSettings, .openProcessLog, .openKeybindingHelp, .toggleSidebar, .toggleInspector:
+            return true
+        case .refreshState:
+            return selectedProject != nil
+        case .sendPrompt:
+            return canSendPrompt
+        case .stopGeneration:
+            return isStreaming
+        case .insertComposerNewline, .cycleThinkingLevel:
+            return true
+        case .closeActiveModal:
+            return hasActiveModal
+        }
+    }
+
+    public func handleEscapeKey() -> Bool {
+        if hasActiveModal {
+            closeActiveModal()
+            return true
+        }
+
+        if isStreaming {
+            stopGeneration()
+            return true
+        }
+
+        return false
+    }
+
+    public func openProject() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Open"
+        panel.message = "Choose a project folder"
+
+        if panel.runModal() == .OK, let url = panel.url {
+            addProject(path: url.path)
+        }
+    }
+
+    public func focusComposer() {
+        composerFocusRequest += 1
+    }
+
+    var canSendPrompt: Bool {
+        !isStreaming &&
+            !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            selectedProject != nil &&
+            !isCreatingNewSession
+    }
+
+    var hasActiveModal: Bool {
+        isShowingKeybindingHelp ||
+            isShowingSettings ||
+            isShowingLogin ||
+            isShowingModelPicker ||
+            isShowingProcessLog
+    }
+
+    func closeActiveModal() {
+        if isShowingKeybindingHelp {
+            isShowingKeybindingHelp = false
+        } else if isShowingSettings {
+            isShowingSettings = false
+        } else if isShowingLogin {
+            isShowingLogin = false
+        } else if isShowingModelPicker {
+            isShowingModelPicker = false
+        } else if isShowingProcessLog {
+            isShowingProcessLog = false
+        }
+    }
+
+    func stopGeneration() {
+        guard isStreaming else { return }
+        abort()
     }
 
     func abort() {

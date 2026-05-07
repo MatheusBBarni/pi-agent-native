@@ -18,9 +18,9 @@ Principles:
 
 Stage agent: engineer
 
-You are working on GitHub issue #16: Add /skill:<skill-id> command support.
+You are working on GitHub issue #15: Add keymaps and keybindings.
 
-Repository issue URL: https://github.com/MatheusBBarni/pi-agent-native/issues/16
+Repository issue URL: https://github.com/MatheusBBarni/pi-agent-native/issues/15
 Current project status: In progress
 Attempt: 
 
