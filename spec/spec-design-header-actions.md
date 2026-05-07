@@ -90,6 +90,9 @@ Out of scope:
 - **CON-002**: Previous Session and Next Session shall not add keyboard shortcuts in this issue.
 - **CON-003**: Decorative icons that are not controls must not be styled or placed in a way that implies clickability.
 - **CON-004**: Previous Session and Next Session are session-list navigation controls, not project navigation controls and not a browser-like history stack.
+- **CON-005**: Do not add `previousSession` or `nextSession` cases to `AppActionID` in this issue unless the Default Keymap invariant is also intentionally changed. The current test suite requires every `AppActionID` case to appear in `DefaultKeymap`, and this issue explicitly forbids new keybindings for Previous Session and Next Session.
+- **CON-006**: Previous Session and Next Session shall compute adjacency from the current `sessionsForProject(_:)` result at click time. The implementation shall not introduce a persistent session navigation snapshot or history stack to stabilize ordering.
+- **CON-007**: Converting `SidebarTitlebarControls` images to buttons shall preserve the existing titlebar drag and double-click-to-zoom behavior around the controls.
 - **PAT-001**: Add a small reusable icon Header Control view when it reduces duplication between sidebar, chat, or composer header controls.
 - **PAT-002**: Keep view-specific menu rendering in the view layer, but route menu item selections to shared AppModel methods.
 - **GUD-001**: Use SF Symbols that match the App Action and provide `.help` plus accessibility labels for icon-only controls.
@@ -173,6 +176,8 @@ Header Controls backed by App Actions shall use these first-version availability
 
 If an action's existing `canPerformAppAction(_:)` behavior differs, update the central predicate rather than overriding availability inside the header view.
 
+Previous Session and Next Session may be represented as dedicated `AppModel` methods such as `canNavigateToPreviousSession()`, `navigateToPreviousSession()`, `canNavigateToNextSession()`, and `navigateToNextSession()` instead of `AppActionID` cases. This is the preferred first-version approach because the current `AppActionID` enum is coupled to `DefaultKeymap` coverage and these controls intentionally have no first-version keybindings.
+
 ## 5. Acceptance Criteria
 
 - **AC-001**: Given the sidebar titlebar renders, When the user clicks the sidebar-left Header Control, Then the sidebar toggles through the `.toggleSidebar` App Action.
@@ -209,6 +214,8 @@ If an action's existing `canPerformAppAction(_:)` behavior differs, update the c
 Issue 12 says header buttons should not be inert. The current code already wires the chat header External Target Menu to Open Externally and wires composer controls to AppModel behavior, but `SidebarTitlebarControls` renders `sidebar.left`, `chevron.left`, and `chevron.right` as plain images. Those icons look like controls but cannot be clicked.
 
 The sidebar icon has a matching existing App Action, Toggle sidebar, so it should become a real Header Control. The user clarified that the chevrons are Previous Session and Next Session controls. They should navigate through the same ordered session list shown in the sidebar for the Selected Project, not through a separate browser-like history stack. These controls do not introduce first-version keybindings.
+
+The implementation must account for the current session-ordering behavior: `switchSession(_:)` touches the selected session, and `sessionsForProject(_:)` sorts by running state and `updatedAt`. Previous Session and Next Session therefore operate on the current rendered Project Session List at the time of each click. This issue does not change sidebar ordering semantics.
 
 No ADR is required for this version because the decision is reversible UI/action wiring and follows the existing App Action architecture.
 
@@ -268,6 +275,7 @@ Scenario: Modal blocks non-modal action
 - Tests prove Header Controls use centralized App Action availability where stateful.
 - Tests prove sidebar toggle, Previous Session, and Next Session dispatch are blocked while a modal is active.
 - Tests prove Previous Session and Next Session use the Project Session List order and disable at list boundaries.
+- Tests prove Previous Session and Next Session do not require new `AppActionID` or `DefaultKeymap` entries.
 - Manual UI validation confirms visible header controls are clickable, disabled with explanation, or hidden.
 - Manual UI validation confirms header layout and styling remain consistent.
 
