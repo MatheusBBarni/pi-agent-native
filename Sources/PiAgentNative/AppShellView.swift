@@ -132,7 +132,7 @@ struct SidebarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SidebarTitlebarControls()
-                .frame(height: 56)
+                .frame(height: 44)
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2, perform: WindowActions.zoomKeyWindow)
 
