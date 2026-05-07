@@ -25,7 +25,7 @@ You are working on GitHub issue #13: Add collapse/expand button in Right Sidebar
 
 Repository issue URL: https://github.com/MatheusBBarni/pi-agent-native/issues/13
 Current project status: In progress
-Attempt: 1
+Attempt: 
 
 Use the repository-owned workflow policy, make focused changes, validate them, and hand off through
 the project status expected by the team.

@@ -240,7 +240,52 @@ Scenario: Navigation preserves runtime collapse
 - `swift test` passes after implementation.
 - Manual UI smoke testing confirms no overlap or clipped content when toggling at normal desktop window sizes.
 
-## 11. Related Specifications / Further Reading
+## 11. Engineer Handoff
+
+The implementation agent should treat this as a narrow Inspector Pane Toggle task.
+
+Recommended implementation sequence:
+
+1. Confirm the current branch state. If a prior attempt already added the toggle, compare it against this specification before editing.
+2. Locate the existing App Action and shell layout contracts for Inspector visibility.
+3. Add or verify a header-level Inspector toggle control that remains visible when the Inspector region is hidden.
+4. Route the control through centralized AppModel action dispatch and availability checks.
+5. Add or verify tests for presentation state, App Action state changes, modal blocking, unrelated state preservation, project/session navigation preservation, and lack of persistence.
+6. Run targeted tests first, then the full Swift test suite if dependencies are available.
+7. Manually smoke-test the macOS UI at normal desktop widths if the app can be launched locally.
+
+Likely files and modules:
+
+- `Sources/PiAgentNative/ChatSurfaceView.swift` for the visible header control.
+- `Sources/PiAgentNative/AppShellView.swift` for conditional Inspector layout.
+- `Sources/PiAgentNative/AppModel.swift` for `.toggleInspector` action routing and centralized availability.
+- `Sources/PiAgentNative/DefaultKeymap.swift` for the existing Command-Option-I shortcut and help text.
+- `Sources/PiAgentNative/InspectorView.swift` only for verifying existing content remains unchanged.
+- `Tests/PiAgentNativeTests/InspectorPaneToggleTests.swift` for focused coverage.
+- `Tests/PiAgentNativeTests/DefaultKeymapTests.swift` for shortcut/action contract coverage.
+
+## 12. Loophole Review
+
+| Loophole | Risk | Required fix |
+|---|---|---|
+| Put the collapse button only inside `InspectorView` | Users cannot expand with the mouse after hiding the Inspector | Place the control in an always-visible header area outside the Inspector region |
+| Mutate `isInspectorVisible` directly in SwiftUI view code | Bypasses modal blocking and future action policy | Dispatch `.toggleInspector` through `AppModel.performAppAction(_:)` |
+| Enable the control while a modal is active | Violates centralized non-modal App Action blocking | Derive enabled state from `canPerformAppAction(.toggleInspector)` |
+| Render identical visible states for visible and hidden Inspector | Users cannot tell whether the next click hides or shows the pane | Provide dynamic accessibility text plus a visible highlighted/selected/icon-state difference |
+| Persist Inspector visibility in session storage | Turns a small runtime layout toggle into a broader persistence feature | Keep `isInspectorVisible` runtime-only for this issue |
+| Reset Inspector visibility on project or session changes | Hiding the pane becomes fragile during normal navigation | Keep visibility owned by app shell state, independent of selection state |
+| Add a second "right sidebar" domain term | Splits glossary and implementation language | Use "Inspector" in docs, tests, and user-facing text |
+| Change left sidebar behavior while adding Inspector toggle | Expands the blast radius beyond issue 13 | Leave left sidebar behavior unchanged except for shared styling reuse |
+| Rely only on keyboard shortcut | Mouse/touchpad discoverability remains unsolved | Add a visible Header Control while preserving Command-Option-I |
+| Skip manual layout smoke testing | Unit tests cannot prove visual clipping or overlap | Launch the app when possible and verify collapse/expand at normal window widths |
+
+Confidence after loophole review:
+
+- The local implementation strategy is fully specified and maps to existing source contracts.
+- GitHub issue title/comment metadata was reachable through the repository connector, but issue body, labels, and project-board status were not fully available from this workspace.
+- Project-board status was not changed from this workspace because no project-status mutation tool was available in the current connector surface.
+
+## 13. Related Specifications / Further Reading
 
 - [CONTEXT.md](../CONTEXT.md)
 - [spec-design-default-keymap.md](spec-design-default-keymap.md)
