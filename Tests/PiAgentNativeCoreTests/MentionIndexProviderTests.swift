@@ -40,17 +40,42 @@ final class MentionIndexProviderTests: XCTestCase {
         XCTAssertFalse(entries.contains { $0.relativePath == "linked/secret.txt" })
     }
 
+    func testEmptyGitIndexDoesNotFallBackToIgnoredFilesystemEntries() throws {
+        let root = temporaryDirectory()
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try runGit(["init"], in: root)
+        try createFile(".gitignore", contents: "*.log\n", in: root)
+        try createFile("debug.log", in: root)
+
+        let entries = try MentionIndexProvider().entries(forProjectAt: root)
+
+        XCTAssertFalse(entries.contains { $0.relativePath == "debug.log" })
+    }
+
     private func temporaryDirectory() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
     }
 
-    private func createFile(_ relativePath: String, in root: URL) throws {
+    private func createFile(_ relativePath: String, contents: String = "", in root: URL) throws {
         let url = root.appendingPathComponent(relativePath)
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        FileManager.default.createFile(atPath: url.path, contents: Data())
+        FileManager.default.createFile(atPath: url.path, contents: contents.data(using: .utf8))
+    }
+
+    private func runGit(_ arguments: [String], in root: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["git"] + arguments
+        process.currentDirectoryURL = root
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
     }
 }

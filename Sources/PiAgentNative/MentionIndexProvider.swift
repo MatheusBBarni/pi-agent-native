@@ -18,7 +18,7 @@ struct MentionIndexProvider {
             throw IndexError.projectUnavailable
         }
 
-        if let gitPaths = gitPaths(in: root), !gitPaths.isEmpty {
+        if let gitPaths = gitPaths(in: root) {
             return entriesFromGitPaths(gitPaths, projectRoot: root)
         }
         return filesystemEntries(projectRoot: root)
@@ -125,9 +125,9 @@ struct MentionIndexProvider {
 
         do {
             try process.run()
+            let data = stdout.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
             guard process.terminationStatus == 0 else { return nil }
-            let data = stdout.fileHandleForReading.readDataToEndOfFile()
             return String(data: data, encoding: .utf8)?
                 .split(separator: "\0")
                 .map(String.init)

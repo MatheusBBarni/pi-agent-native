@@ -203,7 +203,6 @@ public final class AppModel: ObservableObject {
     }
 
     func refreshState() {
-        invalidateMentionIndex(for: selectedProject?.path)
         sendCommand(["id": requestID(), "type": "get_state"])
         sendCommand(["id": requestID(), "type": "get_session_stats"])
         sendCommand(["id": requestID(), "type": "get_available_models"])

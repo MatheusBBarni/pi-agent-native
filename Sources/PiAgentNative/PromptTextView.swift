@@ -164,6 +164,8 @@ enum MentionPickerCommand {
     init?(event: NSEvent) {
         var modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         modifiers.remove(.capsLock)
+        modifiers.remove(.numericPad)
+        modifiers.remove(.function)
         guard modifiers.isEmpty else { return nil }
 
         switch event.keyCode {
