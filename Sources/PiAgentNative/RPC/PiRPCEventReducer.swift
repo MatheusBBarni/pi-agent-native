@@ -3,7 +3,7 @@ import Foundation
 enum PiRPCEventReducerEffect: Equatable {
     case setStreaming(Bool)
     case setCompacting(Bool)
-    case setPendingMessageCount(Int)
+    case setQueuedWork(PiRPCQueueUpdate)
     case appendLog(title: String, detail: String)
     case refreshState
     case extensionUIRequest(PiExtensionUIRequest)
@@ -94,7 +94,7 @@ struct PiRPCEventReducer {
             return []
 
         case .queueUpdate(let event):
-            return [.setPendingMessageCount(event.pendingMessageCount)]
+            return [.setQueuedWork(event)]
 
         case .compactionStart:
             return [

@@ -21,9 +21,9 @@ $build-ios-apps:swiftui-ui-patterns
 
 Stage agent: engineer
 
-You are working on GitHub issue #11: Fix login flow with subscriptions.
+You are working on GitHub issue #21: Add steering and follow-up queue UI.
 
-Repository issue URL: https://github.com/MatheusBBarni/pi-agent-native/issues/11
+Repository issue URL: https://github.com/MatheusBBarni/pi-agent-native/issues/21
 Current project status: In progress
 Attempt: 
 

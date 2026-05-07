@@ -21,9 +21,10 @@ struct InspectorView: View {
                         InspectorMetric(icon: "checkmark.circle", title: model.isConnected ? "Pi RPC connected" : "No process")
                         InspectorMetric(icon: "sparkles", title: model.modelName)
                         InspectorMetric(icon: "brain.head.profile", title: "\(model.thinkingLevel.capitalized) thinking")
-                        if model.pendingMessageCount > 0 {
-                            InspectorMetric(icon: "tray", title: "\(model.pendingMessageCount) queued")
-                        }
+                    }
+
+                    InspectorCard(title: "Queued work") {
+                        QueuedWorkSurface(state: model.queuedWorkDisplayState)
                     }
 
                     if !model.tools.isEmpty {
@@ -49,6 +50,72 @@ struct InspectorView: View {
             Rectangle()
                 .fill(Theme.border)
                 .frame(width: 1)
+        }
+    }
+}
+
+struct QueuedWorkSurface: View {
+    let state: QueuedWorkDisplayState
+
+    var body: some View {
+        switch state {
+        case .empty:
+            InspectorMetric(icon: "tray", title: "No queued work")
+        case .countOnly(let count):
+            VStack(alignment: .leading, spacing: 6) {
+                InspectorMetric(icon: "tray", title: "\(count) \(count == 1 ? "item" : "items") queued")
+                Text("Waiting for queue details")
+                    .uiFont(size: 11)
+                    .foregroundStyle(Theme.tertiaryText)
+            }
+        case .entries(let entries):
+            VStack(alignment: .leading, spacing: 10) {
+                InspectorMetric(icon: "tray", title: "\(entries.count) \(entries.count == 1 ? "item" : "items") queued")
+                ForEach(entries) { entry in
+                    QueuedWorkEntryRow(entry: entry)
+                    if entry.id != entries.last?.id {
+                        Divider()
+                            .overlay(Theme.border)
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct QueuedWorkEntryRow: View {
+    let entry: QueuedWorkEntry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .uiFont(size: 12)
+                    .frame(width: 16)
+                    .foregroundStyle(entry.kind == .steering ? Theme.accent : Theme.green)
+                Text(entry.title)
+                    .uiFont(size: 12, weight: .semibold)
+                    .foregroundStyle(Theme.secondaryText)
+                Spacer()
+            }
+
+            Text(entry.summary(maxLength: 180))
+                .uiFont(size: 11)
+                .foregroundStyle(Theme.tertiaryText)
+                .lineLimit(3)
+                .textSelection(.enabled)
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(entry.title): \(entry.summary)")
+    }
+
+    private var icon: String {
+        switch entry.kind {
+        case .steering:
+            return "arrow.up.right"
+        case .followUp:
+            return "arrow.turn.down.right"
         }
     }
 }
