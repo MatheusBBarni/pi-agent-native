@@ -11,6 +11,7 @@ public final class AppModel: ObservableObject {
     @Published public var isConnected = false
     @Published var isStreaming = false
     @Published var isCompacting = false
+    @Published var composerSelectionRange = NSRange(location: 0, length: 0)
     @Published var modelName = "No model"
     @Published var thinkingLevel = "medium"
     @Published var pendingMessageCount = 0
@@ -18,6 +19,11 @@ public final class AppModel: ObservableObject {
     @Published var eventLog: [EventLog] = []
     @Published var tools: [ToolActivity] = []
     @Published var availableModels: [PiModel] = []
+    @Published var availableSkills: [AvailableSkill] = []
+    @Published var skillAvailability: SkillAvailability = .notLoaded
+    @Published var pendingSelectedSkills: [AvailableSkill] = []
+    @Published var highlightedSkillID: String?
+    @Published private var dismissedSkillQuery: SkillQuery?
     @Published var isShowingModelPicker = false
     @Published var isShowingLogin = false
     @Published var isShowingProcessLog = false
@@ -103,8 +109,48 @@ public final class AppModel: ObservableObject {
         client.onExit = { [weak self] status in
             self?.isConnected = false
             self?.isStreaming = false
+            self?.availableSkills = []
+            self?.skillAvailability = .unavailable("Skills unavailable")
+            self?.pendingSelectedSkills.removeAll()
+            self?.highlightedSkillID = nil
+            self?.dismissedSkillQuery = nil
             self?.statusText = status == 0 ? "Stopped" : "Exited with status \(status)"
             self?.appendLog(title: "process exited", detail: "status \(status)")
+        }
+    }
+
+    var skillPickerState: SkillPickerState? {
+        guard let query = currentSkillQuery else { return nil }
+        if dismissedSkillQuery == query {
+            return nil
+        }
+
+        switch skillAvailability {
+        case .notLoaded:
+            return SkillPickerState(
+                query: query,
+                results: [],
+                highlightedSkillID: nil,
+                status: .unavailable("Skills loading")
+            )
+        case .unavailable(let message):
+            return SkillPickerState(
+                query: query,
+                results: [],
+                highlightedSkillID: nil,
+                status: .unavailable(message)
+            )
+        case .loaded:
+            let results = SkillSelectionLogic.search(query.searchText, in: availableSkills)
+            let highlighted = highlightedSkillID.flatMap { id in
+                results.contains { $0.id == id } ? id : nil
+            } ?? results.first?.id
+            return SkillPickerState(
+                query: query,
+                results: results,
+                highlightedSkillID: highlighted,
+                status: results.isEmpty ? .empty : .results
+            )
         }
     }
 
@@ -119,6 +165,7 @@ public final class AppModel: ObservableObject {
         UserDefaults.standard.set(customExecutablePath, forKey: "customExecutablePath")
 
         do {
+            clearSkillSelectionState(clearAvailableSkills: true)
             let launch = try client.start(workspacePath: selectedProject.path, customExecutable: customExecutablePath)
             isConnected = true
             statusText = "Connected"
@@ -126,6 +173,7 @@ public final class AppModel: ObservableObject {
             appendLog(title: "started pi rpc", detail: "\(launch.diagnostic) --mode rpc")
             sendCommand(["id": requestID(), "type": "get_state"])
             sendCommand(["id": requestID(), "type": "get_available_models"])
+            sendCommand(["id": requestID(), "type": "get_commands"])
             if shouldSwitchToStoredSessionAfterStart,
                let selectedSession,
                !selectedSession.sessionFile.isEmpty {
@@ -135,6 +183,7 @@ public final class AppModel: ObservableObject {
         } catch {
             isConnected = false
             statusText = "Launch failed"
+            skillAvailability = .unavailable("Skills unavailable")
             appendLog(title: "launch failed", detail: error.localizedDescription)
         }
     }
@@ -144,6 +193,7 @@ public final class AppModel: ObservableObject {
         isConnected = false
         isStreaming = false
         statusText = "Stopped"
+        clearSkillSelectionState(clearAvailableSkills: true)
     }
 
     func sendPrompt() {
@@ -160,20 +210,42 @@ public final class AppModel: ObservableObject {
             start()
         }
 
+        switch SkillSelectionLogic.parseSubmission(prompt) {
+        case .normalPrompt:
+            break
+        case .invalid(let message):
+            statusText = "Invalid skill command"
+            appendLog(title: "skill selection failed", detail: message)
+            return
+        case .selection(let skillIDs):
+            submitSkillSelection(skillIDs)
+            return
+        }
+
+        let rpcPrompt: String
+        do {
+            rpcPrompt = try SkillPromptDecorator.decoratedPrompt(userPrompt: prompt, skills: pendingSelectedSkills)
+        } catch {
+            statusText = "Skill expansion failed"
+            appendLog(title: "skill expansion failed", detail: error.localizedDescription)
+            return
+        }
+
         messages.append(ChatMessage(role: .user, title: "You", text: prompt))
         if shouldReplaceGeneratedTitle(sessionTitle) {
             sessionTitle = prompt.truncatedSessionTitle()
             persistCurrentSessionSnapshot()
         }
         composerText = ""
+        pendingSelectedSkills.removeAll()
 
         if selectedSessionID == nil {
-            pendingPromptAfterNewSession = prompt
+            pendingPromptAfterNewSession = rpcPrompt
             isCreatingNewSession = true
             isSwitchingSession = false
             sendCommand(["id": requestID(), "type": "new_session"])
         } else {
-            sendPromptCommand(prompt)
+            sendPromptCommand(rpcPrompt)
         }
     }
 
@@ -192,6 +264,7 @@ public final class AppModel: ObservableObject {
         isCreatingNewSession = false
         isSwitchingSession = false
         pendingPromptAfterNewSession = nil
+        clearSkillSelectionState(clearAvailableSkills: false)
         persistState()
     }
 
@@ -203,6 +276,7 @@ public final class AppModel: ObservableObject {
         sendCommand(["id": requestID(), "type": "get_state"])
         sendCommand(["id": requestID(), "type": "get_session_stats"])
         sendCommand(["id": requestID(), "type": "get_available_models"])
+        sendCommand(["id": requestID(), "type": "get_commands"])
         refreshGitDetails()
     }
 
@@ -268,6 +342,7 @@ public final class AppModel: ObservableObject {
         isCreatingNewSession = false
         isSwitchingSession = false
         pendingPromptAfterNewSession = nil
+        clearSkillSelectionState(clearAvailableSkills: shouldRestart)
         persistState()
         refreshGitDetails()
         if shouldRestart {
@@ -326,6 +401,50 @@ public final class AppModel: ObservableObject {
         sessions.first { $0.id == selectedSessionID }
     }
 
+    func removePendingSkill(_ skill: AvailableSkill) {
+        pendingSelectedSkills.removeAll { $0.id == skill.id }
+    }
+
+    func clearPendingSkills() {
+        pendingSelectedSkills.removeAll()
+    }
+
+    func handleComposerControlKey(_ key: ComposerControlKey) -> Bool {
+        guard let pickerState = skillPickerState else { return false }
+
+        switch key {
+        case .up:
+            moveSkillHighlight(delta: -1, in: pickerState)
+            return !pickerState.results.isEmpty
+        case .down:
+            moveSkillHighlight(delta: 1, in: pickerState)
+            return !pickerState.results.isEmpty
+        case .returnKey, .tab:
+            guard let highlightedSkillID = pickerState.highlightedSkillID,
+                  let skill = pickerState.results.first(where: { $0.id == highlightedSkillID })
+            else { return false }
+            completeSkillQuery(with: skill)
+            return true
+        case .escape:
+            dismissedSkillQuery = pickerState.query
+            highlightedSkillID = nil
+            return true
+        }
+    }
+
+    func highlightSkill(_ skill: AvailableSkill) {
+        highlightedSkillID = skill.id
+    }
+
+    func completeSkillQuery(with skill: AvailableSkill) {
+        guard let query = currentSkillQuery else { return }
+        let replacement = SkillSelectionLogic.replacement(for: skill.id, in: composerText, query: query)
+        composerText = replacement.text
+        composerSelectionRange = replacement.selectedRange
+        highlightedSkillID = nil
+        dismissedSkillQuery = nil
+    }
+
     func sessionsForProject(_ project: ProjectItem) -> [StoredSession] {
         sessions
             .filter { $0.projectPath == project.path }
@@ -348,6 +467,10 @@ public final class AppModel: ObservableObject {
         )
     }
 
+    private var currentSkillQuery: SkillQuery? {
+        SkillSelectionLogic.detectQuery(in: composerText, selectedRange: composerSelectionRange)
+    }
+
     func switchSession(_ session: StoredSession) {
         switchSession(session, expandProject: true)
     }
@@ -355,6 +478,7 @@ public final class AppModel: ObservableObject {
     private func switchSession(_ session: StoredSession, expandProject: Bool) {
         let oldWorkspace = workspacePath
         persistCurrentSessionSnapshot()
+        clearSkillSelectionState(clearAvailableSkills: oldWorkspace != session.projectPath)
         selectedSessionID = session.id
         sessionTitle = session.title
         statusText = session.status
@@ -397,6 +521,51 @@ public final class AppModel: ObservableObject {
     private func ensureConnected() {
         if !isConnected {
             start()
+        }
+    }
+
+    private func submitSkillSelection(_ skillIDs: [String]) {
+        guard skillAvailability.isLoaded else {
+            statusText = "Skills unavailable"
+            appendLog(title: "skill selection failed", detail: "Skills are not available from the running pi process.")
+            return
+        }
+
+        do {
+            let resolved = try SkillSelectionLogic.resolveSelection(
+                skillIDs: skillIDs,
+                availableSkills: availableSkills,
+                existingSkills: pendingSelectedSkills
+            )
+            pendingSelectedSkills.append(contentsOf: resolved)
+            composerText = ""
+            composerSelectionRange = NSRange(location: 0, length: 0)
+            highlightedSkillID = nil
+            dismissedSkillQuery = nil
+            statusText = pendingSelectedSkills.isEmpty ? "Ready" : "Skills selected"
+        } catch {
+            statusText = "Skill selection failed"
+            appendLog(title: "skill selection failed", detail: error.localizedDescription)
+        }
+    }
+
+    private func moveSkillHighlight(delta: Int, in pickerState: SkillPickerState) {
+        let skillIDs = pickerState.results.map(\.id)
+        guard !skillIDs.isEmpty else { return }
+
+        let currentID = pickerState.highlightedSkillID ?? skillIDs[0]
+        let currentIndex = skillIDs.firstIndex(of: currentID) ?? 0
+        let nextIndex = (currentIndex + delta + skillIDs.count) % skillIDs.count
+        highlightedSkillID = skillIDs[nextIndex]
+    }
+
+    private func clearSkillSelectionState(clearAvailableSkills: Bool) {
+        pendingSelectedSkills.removeAll()
+        highlightedSkillID = nil
+        dismissedSkillQuery = nil
+        if clearAvailableSkills {
+            availableSkills.removeAll()
+            skillAvailability = .notLoaded
         }
     }
 
@@ -469,6 +638,10 @@ public final class AppModel: ObservableObject {
         let command = stringValue(event["command"]) ?? "response"
         let success = event["success"] as? Bool ?? false
         if !success {
+            if command == "get_commands" {
+                availableSkills = []
+                skillAvailability = .unavailable("Skills unavailable")
+            }
             appendLog(title: "\(command) failed", detail: stringValue(event["error"]) ?? "unknown error")
             return
         }
@@ -547,6 +720,14 @@ public final class AppModel: ObservableObject {
                     name: stringValue(model["name"]) ?? modelId
                 )
             }
+        } else if command == "get_commands", let data = event["data"] as? [String: Any] {
+            guard let commands = data["commands"] as? [[String: Any]] else {
+                availableSkills = []
+                skillAvailability = .unavailable("Skills unavailable")
+                return
+            }
+            availableSkills = SkillSelectionLogic.availableSkills(from: commands)
+            skillAvailability = .loaded
         } else if command == "get_session_stats", let data = event["data"] as? [String: Any] {
             if let cost = data["cost"] as? Double {
                 appendLog(title: "session stats", detail: "cost $\(String(format: "%.4f", cost))")
@@ -755,7 +936,8 @@ public final class AppModel: ObservableObject {
         guard let role = stringValue(rpcMessage["role"]) else { return nil }
         switch role {
         case "user":
-            return ChatMessage(role: .user, title: "You", text: extractText(from: rpcMessage["content"] ?? ""))
+            let text = extractText(from: rpcMessage["content"] ?? "")
+            return ChatMessage(role: .user, title: "You", text: SkillPromptDecorator.visibleUserPrompt(from: text))
         case "assistant":
             return ChatMessage(role: .assistant, title: "π", text: extractText(from: rpcMessage["content"] ?? ""))
         default:

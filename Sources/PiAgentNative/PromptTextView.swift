@@ -3,17 +3,20 @@ import AppKit
 
 struct PromptTextView: NSViewRepresentable {
     @Binding var text: String
+    @Binding var selectedRange: NSRange
     var placeholder: String
     var fontSize = 15.0
     var isEditable = true
     var onSubmit: () -> Void
     var onCycleReasoning: () -> Void
+    var onControlKey: (ComposerControlKey) -> Bool = { _ in false }
 
     func makeNSView(context: Context) -> NSScrollView {
         let textView = SubmitTextView()
         textView.delegate = context.coordinator
         textView.onSubmit = onSubmit
         textView.onCycleReasoning = onCycleReasoning
+        textView.onControlKey = onControlKey
         textView.placeholder = placeholder
         textView.isEditable = isEditable
         textView.backgroundColor = .clear
@@ -43,8 +46,13 @@ struct PromptTextView: NSViewRepresentable {
         if textView.string != text {
             textView.string = text
         }
+        let safeSelectedRange = Self.clampedSelectedRange(selectedRange, textLength: (textView.string as NSString).length)
+        if textView.selectedRange() != safeSelectedRange {
+            textView.setSelectedRange(safeSelectedRange)
+        }
         textView.onSubmit = onSubmit
         textView.onCycleReasoning = onCycleReasoning
+        textView.onControlKey = onControlKey
         textView.placeholder = placeholder
         textView.font = .systemFont(ofSize: fontSize)
         textView.isEditable = isEditable
@@ -52,20 +60,35 @@ struct PromptTextView: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text)
+        Coordinator(text: $text, selectedRange: $selectedRange)
+    }
+
+    static func clampedSelectedRange(_ range: NSRange, textLength: Int) -> NSRange {
+        let length = max(0, textLength)
+        let location = min(max(0, range.location), length)
+        let selectionLength = min(max(0, range.length), length - location)
+        return NSRange(location: location, length: selectionLength)
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         @Binding var text: String
+        @Binding var selectedRange: NSRange
 
-        init(text: Binding<String>) {
+        init(text: Binding<String>, selectedRange: Binding<NSRange>) {
             _text = text
+            _selectedRange = selectedRange
         }
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             text = textView.string
+            selectedRange = textView.selectedRange()
             textView.needsDisplay = true
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            selectedRange = textView.selectedRange()
         }
     }
 }
@@ -73,20 +96,41 @@ struct PromptTextView: NSViewRepresentable {
 final class SubmitTextView: NSTextView {
     var onSubmit: (() -> Void)?
     var onCycleReasoning: (() -> Void)?
+    var onControlKey: ((ComposerControlKey) -> Bool)?
     var placeholder = ""
 
     override func keyDown(with event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+        if event.keyCode == 126, onControlKey?(.up) == true {
+            return
+        }
+
+        if event.keyCode == 125, onControlKey?(.down) == true {
+            return
+        }
+
+        if event.keyCode == 53, onControlKey?(.escape) == true {
+            return
+        }
+
         if event.keyCode == 36 || event.keyCode == 76 {
-            if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.shift) {
+            if modifiers.contains(.shift) {
                 insertNewlineIgnoringFieldEditor(self)
+            } else if onControlKey?(.returnKey) == true {
+                return
             } else {
                 onSubmit?()
             }
             return
         }
 
-        if event.keyCode == 48, event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.shift) {
+        if event.keyCode == 48, modifiers.contains(.shift) {
             onCycleReasoning?()
+            return
+        }
+
+        if event.keyCode == 48, onControlKey?(.tab) == true {
             return
         }
 
