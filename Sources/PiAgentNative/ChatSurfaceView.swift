@@ -142,13 +142,27 @@ struct ComposerView: View {
 
     var body: some View {
         VStack(spacing: 8) {
+            if let pickerState = model.skillPickerState {
+                SkillPickerView(
+                    state: pickerState,
+                    onHighlight: model.highlightSkill,
+                    onSelect: model.completeSkillQuery
+                )
+            }
+
+            if !model.pendingSelectedSkills.isEmpty {
+                PendingSkillSelectionView()
+            }
+
             PromptTextView(
                 text: $model.composerText,
+                selectedRange: $model.composerSelectionRange,
                 placeholder: "Ask pi to work in this workspace",
                 fontSize: model.uiFontSize,
                 isEditable: !model.isStreaming,
                 onSubmit: model.sendPrompt,
-                onCycleReasoning: model.cycleThinkingLevel
+                onCycleReasoning: model.cycleThinkingLevel,
+                onControlKey: model.handleComposerControlKey
             )
             .frame(minHeight: 48, maxHeight: 86)
             .padding(12)
@@ -239,6 +253,155 @@ struct ComposerView: View {
         .background(Theme.panelBackground)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: Color.black.opacity(0.28), radius: 26, x: 0, y: 18)
+    }
+}
+
+struct PendingSkillSelectionView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(model.pendingSelectedSkills) { skill in
+                        SelectedSkillChip(skill: skill) {
+                            model.removePendingSkill(skill)
+                        }
+                    }
+                }
+            }
+
+            if model.pendingSelectedSkills.count > 1 {
+                Button {
+                    model.clearPendingSkills()
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.tertiaryText)
+                .help("Clear selected skills")
+            }
+        }
+        .frame(height: 28)
+        .padding(.horizontal, 4)
+    }
+}
+
+struct SelectedSkillChip: View {
+    let skill: AvailableSkill
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 11, weight: .semibold))
+            Text(skill.id)
+                .uiFont(size: 12, weight: .medium)
+                .lineLimit(1)
+            Button(action: onRemove) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .frame(width: 16, height: 16)
+            }
+            .buttonStyle(.plain)
+            .help("Remove selected skill")
+        }
+        .foregroundStyle(Theme.secondaryText)
+        .padding(.leading, 8)
+        .padding(.trailing, 5)
+        .frame(height: 24)
+        .background(Theme.elevatedBackground)
+        .clipShape(Capsule())
+    }
+}
+
+struct SkillPickerView: View {
+    let state: SkillPickerState
+    let onHighlight: (AvailableSkill) -> Void
+    let onSelect: (AvailableSkill) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            switch state.status {
+            case .results:
+                ForEach(state.results) { skill in
+                    SkillPickerRow(
+                        skill: skill,
+                        isHighlighted: skill.id == state.highlightedSkillID,
+                        onHighlight: { onHighlight(skill) },
+                        onSelect: { onSelect(skill) }
+                    )
+                }
+            case .empty:
+                SkillPickerDisabledRow(text: "No matching skills")
+            case .unavailable(let message):
+                SkillPickerDisabledRow(text: message)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.elevatedBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Theme.border.opacity(0.8), lineWidth: 1)
+        }
+        .shadow(color: Color.black.opacity(0.22), radius: 14, x: 0, y: 8)
+    }
+}
+
+private struct SkillPickerRow: View {
+    let skill: AvailableSkill
+    let isHighlighted: Bool
+    let onHighlight: () -> Void
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(skill.id)
+                    .uiFont(size: 13, weight: .semibold)
+                    .foregroundStyle(Theme.primaryText)
+                    .lineLimit(1)
+
+                if let detail {
+                    Text(detail)
+                        .uiFont(size: 12)
+                        .foregroundStyle(Theme.tertiaryText)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(isHighlighted ? Theme.accent.opacity(0.22) : Color.clear)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering in
+            if isHovering {
+                onHighlight()
+            }
+        }
+    }
+
+    private var detail: String? {
+        if let displayName = skill.displayName, !displayName.isEmpty, displayName != skill.id {
+            return displayName
+        }
+        return skill.description
+    }
+}
+
+private struct SkillPickerDisabledRow: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .uiFont(size: 13, weight: .medium)
+            .foregroundStyle(Theme.tertiaryText)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
     }
 }
 
