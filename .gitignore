@@ -4,3 +4,14 @@ DerivedData/
 *.xcuserdata/
 *.xcuserstate
 .DS_Store
+
+./prompt.md
+stderr.log
+stdout.log
+
+node_modules/
+.symphony-workspaces/
+*.install
+.env
+.env.*
+!.env.example
