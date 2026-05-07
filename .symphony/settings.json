@@ -71,11 +71,11 @@
       {
         "states": ["Todo", "To-Do", "In progress", "In Progress"],
         "agent": "engineer",
-        "harness": "pi",
+        "harness": "codex",
         "skills": ["build-ios-apps:swiftui-ui-patterns"],
         "startStatus": "In progress",
         "successStatus": "In review",
-        "retryStatus": "To-Do",
+        "retryStatus": "Todo",
         "goal": {
           "enabled": false
         },
@@ -147,9 +147,9 @@
       "stallTimeoutMs": 300000
     },
     "engineer": {
-      "kind": "pi",
-      "command": "pi --model <model> --thinking <reasoning> --print --no-session",
-      "model": "openai-codex/gpt-5.5",
+      "kind": "codex",
+      "command": "codex exec",
+      "model": "gpt-5.5",
       "reasoningEffort": "xhigh",
       "turnTimeoutMs": 3600000,
       "readTimeoutMs": 5000,
