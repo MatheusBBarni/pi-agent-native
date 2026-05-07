@@ -127,8 +127,10 @@ struct ExternalTargetScanner {
     var applicationURLForBundleIdentifier: (String) -> URL? = { bundleIdentifier in
         NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier)
     }
-    var fileExistsAtPath: (String) -> Bool = { path in
-        FileManager.default.fileExists(atPath: path)
+    var directoryExistsAtPath: (String) -> Bool = { path in
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+        return exists && isDirectory.boolValue
     }
     var isExecutableFileAtPath: (String) -> Bool = { path in
         FileManager.default.isExecutableFile(atPath: path)
@@ -162,7 +164,7 @@ struct ExternalTargetScanner {
         for directory in applicationDirectories {
             for appName in definition.appNames {
                 let url = directory.appendingPathComponent(appName, isDirectory: true)
-                if fileExistsAtPath(url.path) {
+                if directoryExistsAtPath(url.path) {
                     return url
                 }
             }
@@ -196,7 +198,10 @@ struct ExternalTargetScanner {
             "/usr/sbin",
             "/sbin"
         ]
-        return Array(NSOrderedSet(array: pathDirectories + defaultDirectories)) as? [String] ?? pathDirectories + defaultDirectories
+        var seenDirectories = Set<String>()
+        return (pathDirectories + defaultDirectories).filter { directory in
+            seenDirectories.insert(directory).inserted
+        }
     }
 
     private static func defaultApplicationDirectories() -> [URL] {
@@ -217,6 +222,32 @@ enum ExternalLaunchPlan: Equatable {
     case openWithApplication(projectURL: URL, applicationURL: URL)
 }
 
+struct ExternalCommandLaunchError: LocalizedError {
+    let executablePath: String
+    let terminationStatus: Int32
+
+    var errorDescription: String? {
+        "\(executablePath) exited with status \(terminationStatus)"
+    }
+}
+
+private enum ExternalCommandProcessRegistry {
+    private static let lock = NSLock()
+    private static var processes: [ObjectIdentifier: Process] = [:]
+
+    static func retain(_ process: Process) {
+        lock.lock()
+        processes[ObjectIdentifier(process)] = process
+        lock.unlock()
+    }
+
+    static func release(_ process: Process) {
+        lock.lock()
+        processes[ObjectIdentifier(process)] = nil
+        lock.unlock()
+    }
+}
+
 enum ExternalTargetLauncher {
     static func launch(
         _ target: AvailableExternalTarget,
@@ -234,11 +265,23 @@ enum ExternalTargetLauncher {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: executablePath)
             process.arguments = arguments
+            process.terminationHandler = { process in
+                ExternalCommandProcessRegistry.release(process)
+                if process.terminationReason == .exit, process.terminationStatus == 0 {
+                    completion(.success(()))
+                } else {
+                    completion(.failure(ExternalCommandLaunchError(
+                        executablePath: executablePath,
+                        terminationStatus: process.terminationStatus
+                    )))
+                }
+            }
 
             do {
+                ExternalCommandProcessRegistry.retain(process)
                 try process.run()
-                completion(.success(()))
             } catch {
+                ExternalCommandProcessRegistry.release(process)
                 completion(.failure(error))
             }
 

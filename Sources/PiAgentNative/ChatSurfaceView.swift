@@ -107,6 +107,8 @@ struct ExternalTargetMenuView: View {
         .menuStyle(.borderlessButton)
         .disabled(model.selectedProject == nil)
         .help(model.selectedProject == nil ? "Open a project first" : "Open externally")
+        .accessibilityLabel("Open externally")
+        .accessibilityHint(model.selectedProject == nil ? "Open a project first" : "Opens the selected project in another app")
     }
 }
 
