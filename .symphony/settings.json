@@ -1,14 +1,21 @@
 {
   "tracker": {
     "kind": "github",
-    "owner": "your-org",
-    "repo": "your-repo",
-    "projectNumber": 1,
+    "owner": "MatheusBBarni",
+    "repo": "pi-agent-native",
+    "projectNumber": 5,
     "apiKeyEnv": "GITHUB_TOKEN"
   },
   "project": {
     "statusField": "Status",
-    "activeStates": ["Backlog", "Todo", "To-Do", "In progress", "In Progress", "In review"],
+    "activeStates": [
+      "Backlog",
+      "Todo",
+      "To-Do",
+      "In progress",
+      "In Progress",
+      "In review"
+    ],
     "terminalStates": ["Done", "Closed", "Cancelled"],
     "startStatus": "In progress",
     "reviewStatus": "In review",
@@ -24,7 +31,7 @@
   "git": {
     "taskBranchPrefix": "symphony/task-",
     "protectedTrunkBranches": ["main", "master"],
-    "autoMerge": true,
+    "autoMerge": false,
     "mergeAttentionStatus": "Human attention",
     "cleanup": {
       "removeWorktreeAfterMerge": true,
@@ -32,10 +39,12 @@
     }
   },
   "pullRequest": {
-    "enabled": false,
+    "enabled": true,
+    "mode": "task",
+    "openOnReview": true,
     "baseBranch": "main",
-    "title": "Symphony batch from <head_branch>",
-    "body": "Opened automatically by Symphony after orchestration became idle."
+    "title": "Symphony: from <head_branch> into <base_branch>",
+    "body": "Automated Task Pull Request opened by Symphony after the task reached review.\n\nIssue: <issue_identifier>\nTask Branch: <head_branch>\nPull Request Base Branch: <base_branch>\n\nReview this task before merging into the Protected Trunk Branch."
   },
   "stageAgents": {
     "enabled": true,
@@ -101,7 +110,7 @@
   "codex": {
     "command": "codex exec",
     "model": "gpt-5.5",
-    "reasoningEffort": "medium",
+    "reasoningEffort": "high",
     "turnTimeoutMs": 3600000,
     "readTimeoutMs": 5000,
     "stallTimeoutMs": 300000
