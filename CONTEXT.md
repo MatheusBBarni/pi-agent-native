@@ -109,7 +109,7 @@ A visible composer control that shows one selected **Skill** before it is consum
 _Avoid_: badge, tag
 
 **Skill Instruction**:
-Native-generated prompt text that tells the Pi coding agent which **Skills** to use for the current request.
+Native-generated prompt text that embeds selected **Skill** content for the current request.
 _Avoid_: RPC skill payload, hidden command
 
 ## Relationships
@@ -284,7 +284,7 @@ _Avoid_: RPC skill payload, hidden command
 > **Domain expert:** "Show a **Selected Skill Chip** for each pending **Skill**, with controls to remove one skill or clear all pending skills."
 >
 > **Dev:** "Does selecting skills require a structured RPC payload?"
-> **Domain expert:** "No. Prepend a native-generated **Skill Instruction** to the next normal prompt because the Pi coding agent understands natural-language skill instructions."
+> **Domain expert:** "No. Prepend a native-generated **Skill Instruction** to the next normal prompt by expanding the selected Skills' `SKILL.md` content into the single prompt string."
 >
 > **Dev:** "Should typing `/` open a general command picker?"
 > **Domain expert:** "No. The **Skill Picker** opens only for active `/skill:` queries."

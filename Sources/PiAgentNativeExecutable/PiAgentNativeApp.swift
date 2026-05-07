@@ -15,19 +15,77 @@ struct PiAgentNativeApp: App {
         .windowStyle(.hiddenTitleBar)
         .commands {
             CommandMenu("Pi") {
-                Button(model.isConnected ? "Stop Pi RPC" : "Start Pi RPC") {
-                    if model.isConnected {
-                        model.stop()
-                    } else {
-                        model.start()
-                    }
+                Button(DefaultKeymap.title(for: .newChat) ?? "New chat") {
+                    model.performAppAction(.newChat)
                 }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .keybindingShortcut(.newChat)
+                .disabled(!model.canPerformAppAction(.newChat))
 
-                Button("New Session") {
-                    model.newSession()
+                Button(DefaultKeymap.title(for: .openProject) ?? "Open project") {
+                    model.performAppAction(.openProject)
                 }
-                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .keybindingShortcut(.openProject)
+                .disabled(!model.canPerformAppAction(.openProject))
+
+                Divider()
+
+                Button(DefaultKeymap.title(for: .focusComposer) ?? "Focus composer") {
+                    model.performAppAction(.focusComposer)
+                }
+                .keybindingShortcut(.focusComposer)
+                .disabled(!model.canPerformAppAction(.focusComposer))
+
+                Button(DefaultKeymap.title(for: .refreshState) ?? "Refresh state") {
+                    model.performAppAction(.refreshState)
+                }
+                .keybindingShortcut(.refreshState)
+                .disabled(!model.canPerformAppAction(.refreshState))
+
+                Divider()
+
+                Button(DefaultKeymap.title(for: .openProcessLog) ?? "Open process log") {
+                    model.performAppAction(.openProcessLog)
+                }
+                .keybindingShortcut(.openProcessLog)
+                .disabled(!model.canPerformAppAction(.openProcessLog))
+
+                Button(DefaultKeymap.title(for: .openKeybindingHelp) ?? "Open Keyboard Shortcuts") {
+                    model.performAppAction(.openKeybindingHelp)
+                }
+                .keybindingShortcut(.openKeybindingHelp)
+                .disabled(!model.canPerformAppAction(.openKeybindingHelp))
+
+                Button(DefaultKeymap.title(for: .openSettings) ?? "Open settings") {
+                    model.performAppAction(.openSettings)
+                }
+                .keybindingShortcut(.openSettings)
+                .disabled(!model.canPerformAppAction(.openSettings))
+
+                Divider()
+
+                Button(DefaultKeymap.title(for: .toggleSidebar) ?? "Toggle sidebar") {
+                    model.performAppAction(.toggleSidebar)
+                }
+                .keybindingShortcut(.toggleSidebar)
+                .disabled(!model.canPerformAppAction(.toggleSidebar))
+
+                Button(DefaultKeymap.title(for: .toggleInspector) ?? "Toggle inspector") {
+                    model.performAppAction(.toggleInspector)
+                }
+                .keybindingShortcut(.toggleInspector)
+                .disabled(!model.canPerformAppAction(.toggleInspector))
+
+                Divider()
+
+                Button("Start Pi RPC") {
+                    model.start()
+                }
+                .disabled(model.isConnected)
+
+                Button("Stop Pi RPC") {
+                    model.stop()
+                }
+                .disabled(!model.isConnected)
             }
         }
     }

@@ -1,3 +1,4 @@
+import AppKit
 import MarkdownUI
 import SwiftUI
 
@@ -78,6 +79,54 @@ struct ChatHeaderView: View {
                 .clipShape(Capsule())
 
             Spacer()
+
+            ExternalTargetMenuView()
+        }
+    }
+}
+
+struct ExternalTargetMenuView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        Menu {
+            ForEach(model.availableExternalTargets) { target in
+                Button {
+                    model.openExternally(target)
+                } label: {
+                    ExternalTargetMenuItemLabel(target: target)
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.forward.app")
+                .uiFont(size: 15, weight: .medium)
+                .foregroundStyle(model.selectedProject == nil ? Theme.tertiaryText : Theme.secondaryText)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .disabled(model.selectedProject == nil)
+        .help(model.selectedProject == nil ? "Open a project first" : "Open externally")
+        .accessibilityLabel("Open externally")
+        .accessibilityHint(model.selectedProject == nil ? "Open a project first" : "Opens the selected project in another app")
+    }
+}
+
+private struct ExternalTargetMenuItemLabel: View {
+    let target: AvailableExternalTarget
+
+    var body: some View {
+        Label {
+            Text(target.displayName)
+        } icon: {
+            if let appIcon = target.appIcon {
+                Image(nsImage: appIcon)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 16, height: 16)
+            } else {
+                Image(systemName: target.fallbackSystemImage)
+            }
         }
     }
 }
@@ -142,6 +191,18 @@ struct ComposerView: View {
 
     var body: some View {
         VStack(spacing: 8) {
+            if let pickerState = model.skillPickerState {
+                SkillPickerView(
+                    state: pickerState,
+                    onHighlight: model.highlightSkill,
+                    onSelect: model.completeSkillQuery
+                )
+            }
+
+            if !model.pendingSelectedSkills.isEmpty {
+                PendingSkillSelectionView()
+            }
+
             promptEditor
                 .zIndex(1)
 
@@ -178,12 +239,12 @@ struct ComposerView: View {
                 Spacer()
 
                 Button {
-                    model.refreshState()
+                    model.performAppAction(.refreshState)
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
                 .buttonStyle(IconButtonStyle())
-                .help("Refresh state")
+                .help(DefaultKeymap.helpText(for: .refreshState) ?? "Refresh state")
 
                 Button {
                     model.showModelPicker()
@@ -207,10 +268,10 @@ struct ComposerView: View {
                         .foregroundStyle(Theme.tertiaryText)
                 }
                 .menuStyle(.borderlessButton)
-                .help("Reasoning level. Shift-Tab cycles levels while typing.")
+                .help(DefaultKeymap.helpText(for: .cycleThinkingLevel) ?? "Cycle thinking level")
 
                 Button {
-                    model.isStreaming ? model.abort() : model.sendPrompt()
+                    model.performAppAction(model.isStreaming ? .stopGeneration : .sendPrompt)
                 } label: {
                     Image(systemName: model.isStreaming ? "stop.fill" : "arrow.up")
                         .uiFont(size: 16, weight: .bold)
@@ -220,8 +281,8 @@ struct ComposerView: View {
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .keyboardShortcut(.return, modifiers: [.command])
-                .disabled(!model.isStreaming && model.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(!model.isStreaming && !model.canSendPrompt)
+                .help(sendButtonHelp)
             }
             .padding(.horizontal, 10)
         }
@@ -236,6 +297,8 @@ struct ComposerView: View {
     private var promptEditor: some View {
         PromptTextView(
             text: $model.composerText,
+            focusRequest: model.composerFocusRequest,
+            selectedRange: $model.composerSelectionRange,
             placeholder: "Ask pi to work in this workspace",
             fontSize: model.uiFontSize,
             isEditable: !model.isStreaming,
@@ -243,8 +306,9 @@ struct ComposerView: View {
             onTextReplacementApplied: model.mentionTextReplacementWasApplied,
             onSelectionChange: model.updateComposerSelection,
             onMentionCommand: model.handleMentionCommand,
-            onSubmit: model.sendPrompt,
-            onCycleReasoning: model.cycleThinkingLevel
+            onSubmit: { model.performAppAction(.sendPrompt) },
+            onCycleReasoning: { model.performAppAction(.cycleThinkingLevel) },
+            onControlKey: model.handleComposerControlKey
         )
         .frame(minHeight: 48, maxHeight: 86)
         .padding(12)
@@ -261,6 +325,162 @@ struct ComposerView: View {
                 .offset(y: -MentionPickerView.preferredHeight(for: state) - 8)
             }
         }
+    }
+
+    private var sendButtonHelp: String {
+        if model.isStreaming {
+            return DefaultKeymap.helpText(for: .stopGeneration) ?? "Stop generation"
+        }
+        return DefaultKeymap.helpText(for: .sendPrompt) ?? "Send prompt"
+    }
+}
+
+struct PendingSkillSelectionView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(model.pendingSelectedSkills) { skill in
+                        SelectedSkillChip(skill: skill) {
+                            model.removePendingSkill(skill)
+                        }
+                    }
+                }
+            }
+
+            if model.pendingSelectedSkills.count > 1 {
+                Button {
+                    model.clearPendingSkills()
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.tertiaryText)
+                .help("Clear selected skills")
+            }
+        }
+        .frame(height: 28)
+        .padding(.horizontal, 4)
+    }
+}
+
+struct SelectedSkillChip: View {
+    let skill: AvailableSkill
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 11, weight: .semibold))
+            Text(skill.id)
+                .uiFont(size: 12, weight: .medium)
+                .lineLimit(1)
+            Button(action: onRemove) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .frame(width: 16, height: 16)
+            }
+            .buttonStyle(.plain)
+            .help("Remove selected skill")
+        }
+        .foregroundStyle(Theme.secondaryText)
+        .padding(.leading, 8)
+        .padding(.trailing, 5)
+        .frame(height: 24)
+        .background(Theme.elevatedBackground)
+        .clipShape(Capsule())
+    }
+}
+
+struct SkillPickerView: View {
+    let state: SkillPickerState
+    let onHighlight: (AvailableSkill) -> Void
+    let onSelect: (AvailableSkill) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            switch state.status {
+            case .results:
+                ForEach(state.results) { skill in
+                    SkillPickerRow(
+                        skill: skill,
+                        isHighlighted: skill.id == state.highlightedSkillID,
+                        onHighlight: { onHighlight(skill) },
+                        onSelect: { onSelect(skill) }
+                    )
+                }
+            case .empty:
+                SkillPickerDisabledRow(text: "No matching skills")
+            case .unavailable(let message):
+                SkillPickerDisabledRow(text: message)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.elevatedBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Theme.border.opacity(0.8), lineWidth: 1)
+        }
+        .shadow(color: Color.black.opacity(0.22), radius: 14, x: 0, y: 8)
+    }
+}
+
+private struct SkillPickerRow: View {
+    let skill: AvailableSkill
+    let isHighlighted: Bool
+    let onHighlight: () -> Void
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(skill.id)
+                    .uiFont(size: 13, weight: .semibold)
+                    .foregroundStyle(Theme.primaryText)
+                    .lineLimit(1)
+
+                if let detail {
+                    Text(detail)
+                        .uiFont(size: 12)
+                        .foregroundStyle(Theme.tertiaryText)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(isHighlighted ? Theme.accent.opacity(0.22) : Color.clear)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering in
+            if isHovering {
+                onHighlight()
+            }
+        }
+    }
+
+    private var detail: String? {
+        if let displayName = skill.displayName, !displayName.isEmpty, displayName != skill.id {
+            return displayName
+        }
+        return skill.description
+    }
+}
+
+private struct SkillPickerDisabledRow: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .uiFont(size: 13, weight: .medium)
+            .foregroundStyle(Theme.tertiaryText)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
     }
 }
 
