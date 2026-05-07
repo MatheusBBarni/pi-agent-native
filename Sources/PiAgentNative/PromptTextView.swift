@@ -46,8 +46,9 @@ struct PromptTextView: NSViewRepresentable {
         if textView.string != text {
             textView.string = text
         }
-        if textView.selectedRange() != selectedRange, selectedRange.location <= (textView.string as NSString).length {
-            textView.setSelectedRange(selectedRange)
+        let safeSelectedRange = Self.clampedSelectedRange(selectedRange, textLength: (textView.string as NSString).length)
+        if textView.selectedRange() != safeSelectedRange {
+            textView.setSelectedRange(safeSelectedRange)
         }
         textView.onSubmit = onSubmit
         textView.onCycleReasoning = onCycleReasoning
@@ -60,6 +61,13 @@ struct PromptTextView: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator {
         Coordinator(text: $text, selectedRange: $selectedRange)
+    }
+
+    static func clampedSelectedRange(_ range: NSRange, textLength: Int) -> NSRange {
+        let length = max(0, textLength)
+        let location = min(max(0, range.location), length)
+        let selectionLength = min(max(0, range.length), length - location)
+        return NSRange(location: location, length: selectionLength)
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -117,12 +125,12 @@ final class SubmitTextView: NSTextView {
             return
         }
 
-        if event.keyCode == 48, onControlKey?(.tab) == true {
+        if event.keyCode == 48, modifiers.contains(.shift) {
+            onCycleReasoning?()
             return
         }
 
-        if event.keyCode == 48, modifiers.contains(.shift) {
-            onCycleReasoning?()
+        if event.keyCode == 48, onControlKey?(.tab) == true {
             return
         }
 

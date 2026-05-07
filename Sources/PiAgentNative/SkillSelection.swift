@@ -258,9 +258,8 @@ enum SkillPromptDecorator {
         var remaining = rpcPrompt
         var strippedAnyBlock = false
 
-        while remaining.hasPrefix("<skill "),
-              let closeRange = remaining.range(of: "</skill>") {
-            remaining.removeSubrange(remaining.startIndex..<closeRange.upperBound)
+        while let blockRange = nativeSkillBlockPrefixRange(in: remaining) {
+            remaining.removeSubrange(blockRange)
             remaining = remaining.trimmingCharacters(in: .whitespacesAndNewlines)
             strippedAnyBlock = true
         }
@@ -283,6 +282,27 @@ enum SkillPromptDecorator {
             .dropFirst(closingIndex + 1)
             .joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func nativeSkillBlockPrefixRange(in prompt: String) -> Range<String.Index>? {
+        guard prompt.hasPrefix("<skill name=\""),
+              let firstLineEnd = prompt.firstIndex(of: "\n") else {
+            return nil
+        }
+
+        let firstLine = prompt[prompt.startIndex..<firstLineEnd]
+        guard firstLine.contains("\" location=\""),
+              firstLine.hasSuffix("\">") else {
+            return nil
+        }
+
+        let bodyStart = prompt.index(after: firstLineEnd)
+        guard prompt[bodyStart...].hasPrefix("References are relative to "),
+              let closeRange = prompt.range(of: "\n</skill>", range: bodyStart..<prompt.endIndex) else {
+            return nil
+        }
+
+        return prompt.startIndex..<closeRange.upperBound
     }
 
     private static func skillBlock(for skill: AvailableSkill) throws -> String {

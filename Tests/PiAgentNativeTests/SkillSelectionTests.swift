@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import PiAgentNativeCore
 
@@ -157,6 +158,27 @@ final class SkillSelectionTests: XCTestCase {
         XCTAssertEqual(SkillPromptDecorator.visibleUserPrompt(from: "Use <skill> literally."), "Use <skill> literally.")
     }
 
+    func testVisibleUserPromptPreservesUserAuthoredSkillLikeBlocks() {
+        let userPrompt = """
+        <skill id="manual">
+        Keep this user-authored XML-like prompt.
+        </skill>
+
+        Explain it.
+        """
+
+        let missingNativeHeader = """
+        <skill name="manual" location="/tmp/manual/SKILL.md">
+        User-authored content without native prompt metadata.
+        </skill>
+
+        Explain it.
+        """
+
+        XCTAssertEqual(SkillPromptDecorator.visibleUserPrompt(from: userPrompt), userPrompt)
+        XCTAssertEqual(SkillPromptDecorator.visibleUserPrompt(from: missingNativeHeader), missingNativeHeader)
+    }
+
     func testDecoratorFailsForMissingOrUnreadablePath() {
         XCTAssertThrowsError(
             try SkillPromptDecorator.decoratedPrompt(
@@ -186,5 +208,49 @@ final class SkillSelectionTests: XCTestCase {
                 .unreadablePath(skillID: "diagnose", path: "/definitely/not/readable/SKILL.md")
             )
         }
+    }
+
+    func testPromptSelectionRangeClampsToCurrentTextLength() {
+        XCTAssertEqual(
+            PromptTextView.clampedSelectedRange(NSRange(location: 2, length: 20), textLength: 5),
+            NSRange(location: 2, length: 3)
+        )
+        XCTAssertEqual(
+            PromptTextView.clampedSelectedRange(NSRange(location: 30, length: 5), textLength: 5),
+            NSRange(location: 5, length: 0)
+        )
+    }
+
+    func testShiftTabCyclesReasoningBeforePickerTabCompletion() {
+        let textView = SubmitTextView()
+        var didCycleReasoning = false
+        var controlKeys: [ComposerControlKey] = []
+        textView.onCycleReasoning = {
+            didCycleReasoning = true
+        }
+        textView.onControlKey = { key in
+            controlKeys.append(key)
+            return true
+        }
+
+        textView.keyDown(with: keyEvent(keyCode: 48, modifiers: [.shift]))
+
+        XCTAssertTrue(didCycleReasoning)
+        XCTAssertTrue(controlKeys.isEmpty)
+    }
+
+    private func keyEvent(keyCode: UInt16, modifiers: NSEvent.ModifierFlags = []) -> NSEvent {
+        NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: modifiers,
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "",
+            charactersIgnoringModifiers: "",
+            isARepeat: false,
+            keyCode: keyCode
+        )!
     }
 }
