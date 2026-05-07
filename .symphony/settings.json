@@ -19,7 +19,7 @@
     "terminalStates": ["Done", "Closed", "Cancelled"],
     "startStatus": "In progress",
     "reviewStatus": "In review",
-    "retryStatus": "To-Do",
+    "retryStatus": "Todo",
     "ensureStatuses": true
   },
   "polling": {
@@ -55,7 +55,7 @@
         "states": ["Backlog"],
         "agent": "planner",
         "skills": [],
-        "successStatus": "To-Do",
+        "successStatus": "Todo",
         "retryStatus": "Backlog",
         "goal": {
           "enabled": false
