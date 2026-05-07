@@ -197,6 +197,8 @@ public final class AppModel: ObservableObject {
     }
 
     public func performAppAction(_ actionID: AppActionID) {
+        guard canPerformAppAction(actionID) else { return }
+
         switch actionID {
         case .newChat:
             newSession()
@@ -230,6 +232,10 @@ public final class AppModel: ObservableObject {
     }
 
     public func canPerformAppAction(_ actionID: AppActionID) -> Bool {
+        if hasActiveModal, actionID != .closeActiveModal {
+            return false
+        }
+
         switch actionID {
         case .newChat:
             return selectedProject != nil

@@ -84,20 +84,17 @@ final class SubmitTextView: NSTextView {
     var placeholder = ""
 
     override func keyDown(with event: NSEvent) {
-        let modifiers = event.normalizedKeybindingModifiers
-
-        if event.keyCode == 36 || event.keyCode == 76 {
-            if modifiers.isEmpty || modifiers == .command {
-                onSubmit?()
-            } else if modifiers == .shift {
-                insertNewlineIgnoringFieldEditor(self)
-            } else {
-                super.keyDown(with: event)
-            }
+        if DefaultKeymap.definitions(for: .sendPrompt).contains(where: { $0.matches(event) }) {
+            onSubmit?()
             return
         }
 
-        if event.keyCode == 48, modifiers == .shift {
+        if DefaultKeymap.firstDefinition(for: .insertComposerNewline)?.matches(event) == true {
+            insertNewlineIgnoringFieldEditor(self)
+            return
+        }
+
+        if DefaultKeymap.firstDefinition(for: .cycleThinkingLevel)?.matches(event) == true {
             onCycleReasoning?()
             return
         }

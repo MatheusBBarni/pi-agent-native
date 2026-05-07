@@ -24,6 +24,22 @@ public enum KeybindingScope: String, CaseIterable {
     case chat = "Chat"
     case composer = "Composer"
     case navigation = "Navigation"
+
+    func overlaps(_ other: KeybindingScope) -> Bool {
+        if self == .appWide || other == .appWide {
+            return true
+        }
+
+        if self == other {
+            return true
+        }
+
+        if self == .focused || other == .focused {
+            return true
+        }
+
+        return false
+    }
 }
 
 public enum KeybindingHelpGroup: String, CaseIterable {
@@ -128,7 +144,7 @@ public enum DefaultKeymap {
         KeybindingDefinition(actionID: .refreshState, title: "Refresh state", key: .character("r"), modifiers: [.command], scope: .appWide, helpGroup: .shell),
         KeybindingDefinition(actionID: .openSettings, title: "Open settings", key: .character(","), modifiers: [.command], scope: .appWide, helpGroup: .shell),
         KeybindingDefinition(actionID: .openProcessLog, title: "Open process log", key: .character("l"), modifiers: [.command, .shift], scope: .appWide, helpGroup: .shell),
-        KeybindingDefinition(actionID: .openKeybindingHelp, title: "Open Keybinding Help", key: .character("/"), modifiers: [.command], scope: .appWide, helpGroup: .shell),
+        KeybindingDefinition(actionID: .openKeybindingHelp, title: "Open Keyboard Shortcuts", key: .character("/"), modifiers: [.command], scope: .appWide, helpGroup: .shell),
         KeybindingDefinition(actionID: .toggleSidebar, title: "Toggle sidebar", key: .character("s"), modifiers: [.command, .option], scope: .appWide, helpGroup: .shell),
         KeybindingDefinition(actionID: .toggleInspector, title: "Toggle inspector", key: .character("i"), modifiers: [.command, .option], scope: .appWide, helpGroup: .shell),
         KeybindingDefinition(actionID: .sendPrompt, title: "Send prompt", key: .returnKey, modifiers: [.command], scope: .focused, helpGroup: .chat),
@@ -143,6 +159,10 @@ public enum DefaultKeymap {
         definitions.first { $0.actionID == actionID }
     }
 
+    public static func definitions(for actionID: AppActionID) -> [KeybindingDefinition] {
+        definitions.filter { $0.actionID == actionID }
+    }
+
     public static func definitions(in group: KeybindingHelpGroup) -> [KeybindingDefinition] {
         definitions.filter { $0.helpGroup == group }
     }
@@ -151,7 +171,16 @@ public enum DefaultKeymap {
         firstDefinition(for: actionID)?.displayLabel
     }
 
-    public static func conflicts() -> [KeybindingConflict] {
+    public static func title(for actionID: AppActionID) -> String? {
+        firstDefinition(for: actionID)?.title
+    }
+
+    public static func helpText(for actionID: AppActionID, title: String? = nil) -> String? {
+        guard let definition = firstDefinition(for: actionID) else { return nil }
+        return "\(title ?? definition.title) - \(definition.displayLabel)"
+    }
+
+    public static func conflicts(in definitions: [KeybindingDefinition] = definitions) -> [KeybindingConflict] {
         var conflicts: [KeybindingConflict] = []
 
         for lhsIndex in definitions.indices {
@@ -160,7 +189,7 @@ public enum DefaultKeymap {
                 let rhs = definitions[rhsIndex]
                 guard lhs.key == rhs.key, lhs.modifiers == rhs.modifiers else { continue }
                 guard !isAllowedPriorityPair(lhs, rhs) else { continue }
-                if lhs.scope == rhs.scope || lhs.scope == .appWide || rhs.scope == .appWide {
+                if lhs.scope.overlaps(rhs.scope) {
                     conflicts.append(.duplicate(lhs, rhs))
                 }
             }
@@ -171,7 +200,9 @@ public enum DefaultKeymap {
 
     private static func isAllowedPriorityPair(_ lhs: KeybindingDefinition, _ rhs: KeybindingDefinition) -> Bool {
         let actionIDs = Set([lhs.actionID, rhs.actionID])
-        return actionIDs == Set([.closeActiveModal, .stopGeneration])
+        let scopes = Set([lhs.scope, rhs.scope])
+        return actionIDs == Set([.closeActiveModal, .stopGeneration]) &&
+            scopes == Set([.focused, .chat])
     }
 }
 

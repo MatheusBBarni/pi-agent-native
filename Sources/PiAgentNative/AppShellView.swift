@@ -278,15 +278,12 @@ struct SidebarCommand: View {
             .padding(.vertical, 10)
         }
         .buttonStyle(.plain)
-        .help(helpText ?? title)
+        .help(helpText)
     }
 
-    private var helpText: String? {
-        guard let actionID,
-              let definition = DefaultKeymap.firstDefinition(for: actionID) else {
-            return nil
-        }
-        return "\(definition.title) - \(definition.displayLabel)"
+    private var helpText: String {
+        guard let actionID else { return title }
+        return DefaultKeymap.helpText(for: actionID, title: title) ?? title
     }
 }
 
@@ -296,7 +293,7 @@ struct KeybindingHelpView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
-                Text("Keybinding Help")
+                Text("Keyboard Shortcuts")
                     .uiFont(size: 22, weight: .semibold)
                 Spacer()
                 Button {
@@ -306,7 +303,7 @@ struct KeybindingHelpView: View {
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
-                .help("Close active modal - Escape")
+                .help(DefaultKeymap.helpText(for: .closeActiveModal) ?? "Close active modal")
             }
 
             VStack(spacing: 16) {

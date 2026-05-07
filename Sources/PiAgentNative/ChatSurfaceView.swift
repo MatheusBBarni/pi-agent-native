@@ -149,7 +149,7 @@ struct ComposerView: View {
                 fontSize: model.uiFontSize,
                 isEditable: !model.isStreaming,
                 onSubmit: { model.performAppAction(.sendPrompt) },
-                onCycleReasoning: model.cycleThinkingLevel
+                onCycleReasoning: { model.performAppAction(.cycleThinkingLevel) }
             )
             .frame(minHeight: 48, maxHeight: 86)
             .padding(12)
@@ -194,7 +194,7 @@ struct ComposerView: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .buttonStyle(IconButtonStyle())
-                .help("Refresh state - \(DefaultKeymap.displayLabel(for: .refreshState) ?? "")")
+                .help(DefaultKeymap.helpText(for: .refreshState) ?? "Refresh state")
 
                 Button {
                     model.showModelPicker()
@@ -218,10 +218,10 @@ struct ComposerView: View {
                         .foregroundStyle(Theme.tertiaryText)
                 }
                 .menuStyle(.borderlessButton)
-                .help("Reasoning level. Shift-Tab cycles levels while typing.")
+                .help(DefaultKeymap.helpText(for: .cycleThinkingLevel) ?? "Cycle thinking level")
 
                 Button {
-                    model.isStreaming ? model.abort() : model.sendPrompt()
+                    model.performAppAction(model.isStreaming ? .stopGeneration : .sendPrompt)
                 } label: {
                     Image(systemName: model.isStreaming ? "stop.fill" : "arrow.up")
                         .uiFont(size: 16, weight: .bold)
@@ -232,6 +232,7 @@ struct ComposerView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(!model.isStreaming && !model.canSendPrompt)
+                .help(sendButtonHelp)
             }
             .padding(.horizontal, 10)
         }
@@ -239,6 +240,13 @@ struct ComposerView: View {
         .background(Theme.panelBackground)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: Color.black.opacity(0.28), radius: 26, x: 0, y: 18)
+    }
+
+    private var sendButtonHelp: String {
+        if model.isStreaming {
+            return DefaultKeymap.helpText(for: .stopGeneration) ?? "Stop generation"
+        }
+        return DefaultKeymap.helpText(for: .sendPrompt) ?? "Send prompt"
     }
 }
 
