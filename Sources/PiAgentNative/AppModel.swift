@@ -43,6 +43,9 @@ public final class AppModel: ObservableObject {
     @Published var expandedProjectIDs: Set<ProjectItem.ID> = []
     @Published var sessions: [StoredSession]
     @Published var selectedSessionID: StoredSession.ID?
+    @Published var availableExternalTargets: [AvailableExternalTarget] = []
+
+    var externalTargetLauncher: ExternalTargetLaunchAction = ExternalTargetLauncher.launch
 
     private let client = PiRPCClient()
     private var currentAssistantID: UUID?
@@ -89,6 +92,7 @@ public final class AppModel: ObservableObject {
             }
         }
         refreshGitDetails()
+        availableExternalTargets = ExternalTargetScanner().scan()
 
         client.onEvent = { [weak self] event in
             self?.handleRPCEvent(event)
@@ -291,6 +295,27 @@ public final class AppModel: ObservableObject {
         let project = ProjectItem(name: url.lastPathComponent, path: path)
         projects.append(project)
         selectProject(project)
+    }
+
+    func openExternally(_ target: AvailableExternalTarget) {
+        guard let selectedProject else {
+            statusText = "Open a project"
+            return
+        }
+
+        let projectPath = selectedProject.path
+        externalTargetLauncher(target, projectPath) { [weak self] result in
+            Task { @MainActor in
+                guard let self else { return }
+                if case .failure(let error) = result {
+                    self.statusText = "Could not open in \(target.displayName)"
+                    self.appendLog(
+                        title: "open externally failed",
+                        detail: "target=\(target.displayName) projectPath=\(projectPath) error=\(error.localizedDescription)"
+                    )
+                }
+            }
+        }
     }
 
     var selectedProject: ProjectItem? {
