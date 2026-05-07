@@ -197,6 +197,62 @@ final class AuthAccessStateTests: XCTestCase {
         XCTAssertEqual(snapshot.kind(for: "anthropic"), .oauth)
     }
 
+    func testProviderLoginURLDetectorWaitsForCompleteSplitURL() throws {
+        var detector = ProviderLoginURLDetector()
+
+        XCTAssertNil(detector.append("Open https://auth.example/"))
+        XCTAssertEqual(
+            detector.append("callback?code=abc\n"),
+            URL(string: "https://auth.example/callback?code=abc")
+        )
+    }
+
+    func testProviderLoginURLDetectorCanFinalizeURLWithoutTrailingBoundary() throws {
+        var detector = ProviderLoginURLDetector()
+
+        XCTAssertNil(detector.append("Open https://auth.example/callback?code=abc"))
+        XCTAssertEqual(
+            detector.detectFinalURL(),
+            URL(string: "https://auth.example/callback?code=abc")
+        )
+    }
+
+    func testProviderLoginURLDetectorUsesLatestCompleteWebURL() throws {
+        var detector = ProviderLoginURLDetector()
+
+        XCTAssertEqual(
+            detector.append("First https://auth.example/one\nThen https://auth.example/two\n"),
+            URL(string: "https://auth.example/two")
+        )
+    }
+
+    func testProviderLoginURLDetectorAllowsSentencePunctuationAfterURL() throws {
+        var detector = ProviderLoginURLDetector()
+
+        XCTAssertEqual(
+            detector.append("Open https://auth.example/callback?code=abc.\n"),
+            URL(string: "https://auth.example/callback?code=abc")
+        )
+    }
+
+    func testProviderLoginURLDetectorIgnoresNonWebLinks() {
+        var detector = ProviderLoginURLDetector()
+
+        XCTAssertNil(detector.append("Email support@example.com\n"))
+        XCTAssertNil(detector.append("Use file:///tmp/token\n"))
+    }
+
+    func testProviderLoginURLOpeningTrackerSuppressesDuplicatesPerAttempt() throws {
+        var tracker = ProviderLoginURLOpeningTracker()
+        let url = try XCTUnwrap(URL(string: "https://auth.example/callback?code=abc"))
+
+        XCTAssertTrue(tracker.shouldOpen(url))
+        XCTAssertFalse(tracker.shouldOpen(url))
+
+        tracker.reset()
+        XCTAssertTrue(tracker.shouldOpen(url))
+    }
+
     private func response(
         id: String,
         command: String,

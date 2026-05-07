@@ -1,6 +1,6 @@
 ---
 title: Login and Subscription State Design
-version: 1.1
+version: 1.2
 date_created: 2026-05-07
 last_updated: 2026-05-07
 owner: Pi Agent Native
@@ -26,6 +26,7 @@ In scope:
 - Gating subscription-required actions only after the latest access refresh is known.
 - Surfacing authentication and subscription lookup errors without granting stale access.
 - Preserving current API-key and subscription login providers.
+- Opening detected subscription login URLs in the browser, with a visible manual reopen fallback.
 
 Out of scope:
 
@@ -48,6 +49,8 @@ Out of scope:
 **Subscription-Gated Action**: An App Action or agent interaction that requires active Subscription Access before it can run.
 
 **Provider Login**: A login flow for a supported provider, including API-key save or subscription OAuth/device-code login.
+
+**Provider Login URL**: A URL emitted by a Provider Login process that must be opened in the user's browser to continue authentication.
 
 **Credential Store**: The `pi` credential directory and `auth.json` file currently written under `~/.pi/agent` unless `PI_CODING_AGENT_DIR` overrides it.
 
@@ -82,6 +85,11 @@ Out of scope:
 - **REQ-023**: Existing API-key providers and subscription providers shall continue to appear in the login sheet.
 - **REQ-024**: The app shall not persist Subscription Access as authoritative app state across launches; app launch must refresh access from the current credential/RPC state.
 - **REQ-025**: Closing the login sheet through Done, Escape, or modal dismissal shall use the same success/failure handling rules for any completed subscription login process.
+- **REQ-026**: The subscription login runner shall capture Provider Login URLs from both stdout and stderr output.
+- **REQ-027**: The login sheet shall open each newly detected Provider Login URL in the user's browser exactly once per login attempt.
+- **REQ-028**: The login sheet shall keep the latest Provider Login URL visible through a manual Open Link control after automatic opening.
+- **REQ-029**: Provider Login URL detection shall be provider-agnostic and shall not parse provider-specific billing pages or account dashboards.
+- **REQ-030**: Provider Login URL detection shall inspect accumulated login output so URLs split across stdout or stderr read chunks can still be detected after the complete URL is available.
 - **CON-001**: The native app must not parse provider-specific billing pages, checkout state, or account dashboards.
 - **CON-002**: The `pi` Credential Store remains the credential authority; native state may cache UI state but must not redefine credential semantics.
 - **CON-003**: Access-gated UI must fail closed during asynchronous refreshes.
@@ -161,6 +169,9 @@ If a future RPC response provides a dedicated subscription/access field, the imp
 
 - API-key save calls the existing credential save path and then triggers Access Refresh.
 - Subscription login calls the existing provider login command runner.
+- The subscription login runner captures stdout and stderr, detects Provider Login URLs, exposes the latest detected URL to the login sheet, and preserves raw output for troubleshooting.
+- The login sheet opens newly detected Provider Login URLs through macOS browser opening and prevents repeated automatic opens for the same URL during one login attempt.
+- The login sheet exposes an Open Link fallback when a Provider Login URL has been detected.
 - A zero exit status from the subscription login process means credentials may have changed; it does not by itself mean Subscription Access is active.
 - Closing the login sheet after successful subscription login must not leave access active until Access Refresh completes.
 - Closing the login sheet through Escape or another modal dismissal must not skip required success or failure handling for a completed subscription login process.
@@ -192,6 +203,10 @@ The app shall provide a logout or credential-clearing path as part of this issue
 - **AC-013**: Given Access Refresh A is in progress, When Access Refresh B starts and response A arrives later, Then response A is ignored and cannot overwrite B's access state.
 - **AC-014**: Given subscription login exits with status 0, When the user dismisses the login sheet through Done, Escape, or another modal dismissal path, Then the same success handling clears stale access, restarts RPC, and starts Access Refresh exactly once.
 - **AC-015**: Given an API-key-backed account has usable models, When the app renders subscription-only controls, Then those controls remain disabled unless a subscription-backed credential context is refreshed as active.
+- **AC-016**: Given a subscription login process emits a Provider Login URL, When the URL is first detected, Then the app opens that URL in the user's browser and shows an Open Link fallback.
+- **AC-017**: Given the same Provider Login URL is emitted multiple times during one login attempt, When the login sheet observes repeated output, Then the app does not repeatedly open duplicate browser tabs for that URL.
+- **AC-018**: Given a subscription login process emits only terminal instructions and no URL, When the user views the login sheet, Then the terminal output remains visible and no automatic browser opening is attempted.
+- **AC-019**: Given a subscription login process emits a Provider Login URL across multiple output chunks, When the accumulated output contains a complete URL, Then the app detects the URL and treats it like any other Provider Login URL.
 
 ## 6. Test Automation Strategy
 
@@ -199,7 +214,7 @@ The app shall provide a logout or credential-clearing path as part of this issue
 - **Frameworks**: XCTest and existing SwiftPM test targets.
 - **Test Data Management**: Use temporary credential directories for NativeAuthStore behavior and deterministic mock RPC responses for `get_state` and `get_available_models`.
 - **CI/CD Integration**: Existing `swift test` must pass. New tests should run without real provider credentials, network access, or a real `pi` subscription.
-- **Coverage Requirements**: Cover login success, login failure, refresh success with API-key-backed models, refresh success with subscription-backed models, refresh success without models, refresh failure, stale refresh response ordering, logout, credential replacement, and RPC exit/restart clearing behavior.
+- **Coverage Requirements**: Cover login success, login failure, Provider Login URL detection, split-output URL detection, duplicate suppression, refresh success with API-key-backed models, refresh success with subscription-backed models, refresh success without models, refresh failure, stale refresh response ordering, logout, credential replacement, and RPC exit/restart clearing behavior.
 - **Performance Testing**: No load testing is required. Access Refresh should use existing RPC commands and should not block the main thread.
 
 ## 7. Rationale & Context
@@ -239,6 +254,23 @@ Scenario: Successful subscription login
 3. App clears stale Model Access and Subscription Access, then marks access refreshing.
 4. App restarts RPC and sends get_state plus get_available_models.
 5. App marks Subscription Access active only after refreshed model availability confirms usable subscription-backed access.
+```
+
+```text
+Scenario: Browser handoff during subscription login
+1. User starts ChatGPT / OpenAI Codex subscription login.
+2. The login process prints a Provider Login URL.
+3. App opens that URL in the user's browser once.
+4. Login sheet keeps the URL available through Open Link while terminal output remains visible.
+5. If the process prints the same URL again, app does not open duplicate browser tabs.
+```
+
+```text
+Scenario: Provider Login URL split across chunks
+1. Provider login output first contains "Open https://auth.example/".
+2. Later output appends "callback?code=abc".
+3. App detects the complete Provider Login URL from accumulated output.
+4. App opens the detected URL once and keeps it available for manual reopening.
 ```
 
 ```text
@@ -283,7 +315,9 @@ Scenario: Refresh error
 - New AppModel tests prove successful refresh with subscription-backed models enables both Model Access and Subscription Access.
 - New AppModel tests prove stale Refresh Epoch responses cannot overwrite a newer refresh state.
 - New AppModel tests prove successful refresh without models shows authenticated-without-active-model-access state.
+- New login-runner or login-sheet tests prove Provider Login URLs are detected from accumulated process output, automatic browser opening is de-duplicated per attempt, and the manual Open Link fallback remains available.
 - Manual validation confirms model picker copy distinguishes unauthenticated, refreshing, no model access, model access without active subscription, active subscription, and refresh error states.
+- Manual validation confirms a subscription login opens the detected Provider Login URL in the browser and still allows manual reopening from the login sheet.
 - Manual validation confirms existing API-key and subscription provider choices still appear and existing login commands still launch.
 
 ## 11. Related Specifications / Further Reading

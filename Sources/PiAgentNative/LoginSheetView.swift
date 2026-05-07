@@ -9,7 +9,7 @@ struct LoginSheetView: View {
     @State private var apiKey = ""
     @State private var terminalInput = ""
     @State private var errorMessage: String?
-    @State private var openedLoginURLs: Set<URL> = []
+    @State private var loginURLOpeningTracker = ProviderLoginURLOpeningTracker()
 
     private var oauthRunner: OAuthLoginRunner {
         model.oauthLoginRunner
@@ -44,8 +44,7 @@ struct LoginSheetView: View {
         .frame(width: 620)
         .background(Theme.windowBackground)
         .onChange(of: oauthRunner.lastURL) { _, url in
-            guard let url, !openedLoginURLs.contains(url) else { return }
-            openedLoginURLs.insert(url)
+            guard let url, loginURLOpeningTracker.shouldOpen(url) else { return }
             NSWorkspace.shared.open(url)
         }
         .onDisappear {
@@ -119,7 +118,7 @@ struct LoginSheetView: View {
 
             HStack {
                 Button(oauthRunner.isRunning ? "Running..." : "Start Login") {
-                    openedLoginURLs.removeAll()
+                    loginURLOpeningTracker.reset()
                     model.startSubscriptionLogin(provider: selectedSubscriptionProvider)
                 }
                 .disabled(oauthRunner.isRunning)

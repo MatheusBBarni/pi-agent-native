@@ -14,13 +14,16 @@ Principles:
 - Run targeted verification with XCTest, Swift Package Manager, or Xcode builds as appropriate, and report what changed.
 - Avoid unrelated refactors.
 
+Stage Skill Load:
+$build-ios-apps:swiftui-ui-patterns
+
 ---
 
 Stage agent: engineer
 
-You are working on GitHub issue #1: Implement @ file add picker.
+You are working on GitHub issue #11: Fix login flow with subscriptions.
 
-Repository issue URL: https://github.com/MatheusBBarni/pi-agent-native/issues/1
+Repository issue URL: https://github.com/MatheusBBarni/pi-agent-native/issues/11
 Current project status: In progress
 Attempt: 
 

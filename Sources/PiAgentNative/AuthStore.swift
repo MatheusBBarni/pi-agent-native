@@ -115,6 +115,7 @@ final class OAuthLoginRunner: ObservableObject {
 
     private var process: Process?
     private var stdinPipe: Pipe?
+    private var loginURLDetector = ProviderLoginURLDetector()
 
     @discardableResult
     func start(provider: LoginProvider) -> Result<UUID, Error> {
@@ -122,6 +123,7 @@ final class OAuthLoginRunner: ObservableObject {
         output = ""
         exitStatus = nil
         lastURL = nil
+        loginURLDetector.reset()
         currentProvider = provider
         let attemptID = UUID()
         currentAttemptID = attemptID
@@ -154,8 +156,13 @@ final class OAuthLoginRunner: ObservableObject {
         process.terminationHandler = { [weak self] process in
             stdoutPipe.fileHandleForReading.readabilityHandler = nil
             stderrPipe.fileHandleForReading.readabilityHandler = nil
+            let stdoutRemainder = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+            let stderrRemainder = stderrPipe.fileHandleForReading.readDataToEndOfFile()
             DispatchQueue.main.async {
                 guard let self else { return }
+                self.append(stdoutRemainder)
+                self.append(stderrRemainder)
+                self.detectFinalLoginURL()
                 self.isRunning = false
                 self.exitStatus = process.terminationStatus
                 self.append("\nLogin process exited with status \(process.terminationStatus).\n")
@@ -193,19 +200,103 @@ final class OAuthLoginRunner: ObservableObject {
         isRunning = false
     }
 
+    private func append(_ data: Data) {
+        guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+        append(text)
+    }
+
     private func append(_ text: String) {
+        guard !text.isEmpty else { return }
         output += text
-        if let url = firstURL(in: text) {
+        if let url = loginURLDetector.append(text) {
             lastURL = url
         }
     }
 
-    private func firstURL(in text: String) -> URL? {
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
-            return nil
+    private func detectFinalLoginURL() {
+        if let url = loginURLDetector.detectFinalURL() {
+            lastURL = url
         }
-        let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        return detector.firstMatch(in: text, range: range)?.url
     }
 
+}
+
+struct ProviderLoginURLDetector: Equatable {
+    private var accumulatedOutput = ""
+
+    mutating func reset() {
+        accumulatedOutput = ""
+    }
+
+    mutating func append(_ text: String) -> URL? {
+        accumulatedOutput += text
+        return Self.latestCompleteWebURL(in: accumulatedOutput, allowTerminalURL: false)
+    }
+
+    func detectFinalURL() -> URL? {
+        Self.latestCompleteWebURL(in: accumulatedOutput, allowTerminalURL: true)
+    }
+
+    static func latestCompleteWebURL(in text: String, allowTerminalURL: Bool) -> URL? {
+        guard !text.isEmpty,
+              let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        else {
+            return nil
+        }
+
+        let fullRange = NSRange(text.startIndex..<text.endIndex, in: text)
+        let matches = detector.matches(in: text, range: fullRange)
+        return matches.compactMap { match -> URL? in
+            guard let url = match.url,
+                  isWebURL(url),
+                  isCompleteMatch(match.range, in: text, allowTerminalURL: allowTerminalURL)
+            else {
+                return nil
+            }
+            return url
+        }.last
+    }
+
+    private static func isWebURL(_ url: URL) -> Bool {
+        switch url.scheme?.lowercased() {
+        case "http", "https":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func isCompleteMatch(
+        _ nsRange: NSRange,
+        in text: String,
+        allowTerminalURL: Bool
+    ) -> Bool {
+        guard let range = Range(nsRange, in: text) else { return false }
+
+        if range.upperBound < text.endIndex {
+            return isBoundary(text[range.upperBound])
+        }
+
+        return allowTerminalURL
+    }
+
+    private static func isBoundary(_ character: Character) -> Bool {
+        if character.isWhitespace || character.isNewline {
+            return true
+        }
+
+        return [")", "]", "}", ">", "\"", "'", "`", ".", ",", ";", ":"].contains(character)
+    }
+}
+
+struct ProviderLoginURLOpeningTracker: Equatable {
+    private var openedURLs: Set<URL> = []
+
+    mutating func reset() {
+        openedURLs.removeAll()
+    }
+
+    mutating func shouldOpen(_ url: URL) -> Bool {
+        openedURLs.insert(url).inserted
+    }
 }

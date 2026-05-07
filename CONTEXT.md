@@ -196,6 +196,10 @@ _Avoid_: model reload, auth ping
 An **App Action** or agent interaction that requires active **Subscription Access** before it can run.
 _Avoid_: premium action, paid action
 
+**Provider Login URL**:
+A URL emitted by a **Provider Login** process that must be opened in the user's browser to continue authentication.
+_Avoid_: redirect text, auth link
+
 **Queued Work**:
 A user-facing prompt-like message accepted by Pi Agent Native while the Pi coding agent is busy and waiting for later delivery to the agent.
 _Avoid_: pending count, buffered input
@@ -514,6 +518,9 @@ _Avoid_: slash command button, hidden compact command
 >
 > **Dev:** "Can logout leave the previous account's subscription status visible?"
 > **Domain expert:** "No. Logout clears **Authentication State**, **Model Access**, and **Subscription Access** immediately."
+>
+> **Dev:** "If a subscription login prints a URL, is showing it in terminal output enough?"
+> **Domain expert:** "No. A **Provider Login URL** should open in the browser when first detected, while remaining visible for manual reopening."
 >
 > **Dev:** "Should an access refresh error grant access because the user was previously subscribed?"
 > **Domain expert:** "No. Unknown or failed **Subscription Access** is not active access. Show the error without leaving stale access enabled."
