@@ -81,7 +81,66 @@ struct ChatHeaderView: View {
             Spacer()
 
             ExternalTargetMenuView()
+            InspectorToggleButtonView()
         }
+    }
+}
+
+struct InspectorToggleButtonPresentation: Equatable {
+    let isInspectorVisible: Bool
+    let isEnabled: Bool
+
+    var iconSystemName: String { "sidebar.right" }
+    var isHighlighted: Bool { !isInspectorVisible }
+    var helpText: String { DefaultKeymap.helpText(for: .toggleInspector) ?? "Toggle inspector" }
+    var accessibilityHint: String { "Toggles the inspector pane" }
+
+    var accessibilityLabel: String {
+        isInspectorVisible ? "Hide inspector" : "Show inspector"
+    }
+
+    var accessibilityValue: String {
+        isInspectorVisible ? "Inspector visible" : "Inspector hidden"
+    }
+}
+
+private struct InspectorToggleButtonView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        let presentation = InspectorToggleButtonPresentation(
+            isInspectorVisible: model.isInspectorVisible,
+            isEnabled: model.canPerformAppAction(.toggleInspector)
+        )
+
+        Button {
+            model.performAppAction(.toggleInspector)
+        } label: {
+            Image(systemName: presentation.iconSystemName)
+                .uiFont(size: 15, weight: .medium)
+                .foregroundStyle(iconColor(for: presentation))
+                .frame(width: 30, height: 30)
+                .background(backgroundColor(for: presentation))
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!presentation.isEnabled)
+        .help(presentation.helpText)
+        .accessibilityLabel(Text(presentation.accessibilityLabel))
+        .accessibilityValue(Text(presentation.accessibilityValue))
+        .accessibilityHint(Text(presentation.accessibilityHint))
+    }
+
+    private func iconColor(for presentation: InspectorToggleButtonPresentation) -> Color {
+        if !presentation.isEnabled {
+            return Theme.tertiaryText
+        }
+        return presentation.isHighlighted ? Theme.accent : Theme.secondaryText
+    }
+
+    private func backgroundColor(for presentation: InspectorToggleButtonPresentation) -> Color {
+        presentation.isHighlighted ? Theme.elevatedBackground : Color.clear
     }
 }
 
