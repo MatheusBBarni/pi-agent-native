@@ -72,6 +72,7 @@ enum PiRPCValue {
 }
 
 struct PiRPCResponse {
+    var id: String?
     var command: String
     var success: Bool
     var data: [String: Any]?
@@ -79,6 +80,7 @@ struct PiRPCResponse {
     var raw: [String: Any]
 
     init(payload: [String: Any]) {
+        id = PiRPCValue.string(payload["id"])
         command = PiRPCValue.string(payload["command"]) ?? "response"
         success = payload["success"] as? Bool ?? false
         data = payload["data"] as? [String: Any]

@@ -21,9 +21,9 @@ $build-ios-apps:swiftui-ui-patterns
 
 Stage agent: engineer
 
-You are working on GitHub issue #13: Add collapse/expand button in Right Sidebar.
+You are working on GitHub issue #11: Fix login flow with subscriptions.
 
-Repository issue URL: https://github.com/MatheusBBarni/pi-agent-native/issues/13
+Repository issue URL: https://github.com/MatheusBBarni/pi-agent-native/issues/11
 Current project status: In progress
 Attempt: 
 

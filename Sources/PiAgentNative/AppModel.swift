@@ -16,6 +16,7 @@ public final class AppModel: ObservableObject {
     @Published var thinkingLevel = "medium"
     @Published var pendingMessageCount = 0
     @Published var availableModels: [PiModel] = []
+    @Published var authAccess = AuthAccessState()
     @Published var availableSkills: [AvailableSkill] = []
     @Published var skillAvailability: SkillAvailability = .notLoaded
     @Published var pendingSelectedSkills: [AvailableSkill] = []
@@ -55,11 +56,13 @@ public final class AppModel: ObservableObject {
     let sessionIndexStore: NativeSessionIndexStore
     let settingsStore: SettingsStore
     let extensionUIRouter = ExtensionUIRouter()
+    let oauthLoginRunner = OAuthLoginRunner()
 
     var externalTargetLauncher: ExternalTargetLaunchAction = ExternalTargetLauncher.launch
 
     private let client = PiRPCClient()
     private let reducer = PiRPCEventReducer()
+    private var accessRefreshTracker = AuthAccessRefreshTracker()
     private var storeCancellables: Set<AnyCancellable> = []
     private var shouldSwitchToStoredSessionAfterStart = true
     private var isCreatingNewSession = false
@@ -68,6 +71,7 @@ public final class AppModel: ObservableObject {
     private var mentionIndexCache: [String: [MentionIndexEntry]] = [:]
     private var mentionIndexTask: Task<Void, Never>?
     private var mentionIndexLoadingProjectPath: String?
+    private var handledSubscriptionLoginAttemptIDs: Set<UUID> = []
 
     var workspacePath: String {
         get { workspaceStore.workspacePath }
@@ -167,6 +171,12 @@ public final class AppModel: ObservableObject {
         bindStoreChanges()
         refreshGitDetails()
 
+        oauthLoginRunner.onCompletion = { [weak self] provider, attemptID, exitStatus in
+            Task { @MainActor in
+                self?.completeSubscriptionLogin(provider: provider, attemptID: attemptID, exitStatus: exitStatus)
+            }
+        }
+
         client.onEvent = { [weak self] event in
             self?.handleRPCEvent(event)
         }
@@ -174,15 +184,17 @@ public final class AppModel: ObservableObject {
             self?.appendLog(title: "stderr", detail: text.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         client.onExit = { [weak self] status in
-            self?.isConnected = false
-            self?.isStreaming = false
-            self?.availableSkills = []
-            self?.skillAvailability = .unavailable("Skills unavailable")
-            self?.pendingSelectedSkills.removeAll()
-            self?.highlightedSkillID = nil
-            self?.dismissedSkillQuery = nil
-            self?.statusText = status == 0 ? "Stopped" : "Exited with status \(status)"
-            self?.appendLog(title: "process exited", detail: "status \(status)")
+            guard let self else { return }
+            self.isConnected = false
+            self.isStreaming = false
+            self.availableSkills = []
+            self.skillAvailability = .unavailable("Skills unavailable")
+            self.pendingSelectedSkills.removeAll()
+            self.highlightedSkillID = nil
+            self.dismissedSkillQuery = nil
+            self.clearAuthDerivedState(authentication: self.authenticationStateFromCredentialStore())
+            self.statusText = status == 0 ? "Stopped" : "Exited with status \(status)"
+            self.appendLog(title: "process exited", detail: "status \(status)")
         }
     }
 
@@ -194,6 +206,7 @@ public final class AppModel: ObservableObject {
         relayStoreChanges(from: sessionIndexStore)
         relayStoreChanges(from: settingsStore)
         relayStoreChanges(from: extensionUIRouter)
+        relayStoreChanges(from: oauthLoginRunner)
     }
 
     private func relayStoreChanges<Store: ObservableObject>(from store: Store) {
@@ -252,13 +265,17 @@ public final class AppModel: ObservableObject {
 
         do {
             clearSkillSelectionState(clearAvailableSkills: true)
+            clearAuthDerivedState(
+                authentication: authenticationStateFromCredentialStore(),
+                modelAccess: .refreshing,
+                subscriptionAccess: .refreshing
+            )
             let launch = try client.start(workspacePath: selectedProject.path, customExecutable: customExecutablePath)
             isConnected = true
             statusText = "Connected"
             launchDetail = "\(launch.displayName): \(launch.diagnostic)"
             appendLog(title: "started pi rpc", detail: "\(launch.diagnostic) --mode rpc")
-            sendCommand(.getState())
-            sendCommand(.getAvailableModels())
+            beginAccessRefresh(reason: "pi rpc start")
             sendCommand(.getCommands())
             if shouldSwitchToStoredSessionAfterStart,
                let selectedSession,
@@ -270,6 +287,11 @@ public final class AppModel: ObservableObject {
             isConnected = false
             statusText = "Launch failed"
             skillAvailability = .unavailable("Skills unavailable")
+            clearAuthDerivedState(
+                authentication: authenticationStateFromCredentialStore(),
+                modelAccess: .failed(message: error.localizedDescription),
+                subscriptionAccess: .failed(message: error.localizedDescription)
+            )
             appendLog(title: "launch failed", detail: error.localizedDescription)
         }
     }
@@ -280,6 +302,7 @@ public final class AppModel: ObservableObject {
         isStreaming = false
         statusText = "Stopped"
         clearSkillSelectionState(clearAvailableSkills: true)
+        clearAuthDerivedState(authentication: authenticationStateFromCredentialStore())
     }
 
     func sendPrompt() {
@@ -292,13 +315,19 @@ public final class AppModel: ObservableObject {
         }
         guard !isCreatingNewSession else { return }
 
+        let submission = SkillSelectionLogic.parseSubmission(prompt)
+
         if !isConnected {
             start()
         }
 
-        switch SkillSelectionLogic.parseSubmission(prompt) {
+        switch submission {
         case .normalPrompt:
-            break
+            if let message = authAccess.sendPromptUnavailableMessage {
+                statusText = "Model access unavailable"
+                appendLog(title: "prompt blocked", detail: message)
+                return
+            }
         case .invalid(let message):
             statusText = "Invalid skill command"
             appendLog(title: "skill selection failed", detail: message)
@@ -355,7 +384,10 @@ public final class AppModel: ObservableObject {
     }
 
     public func performAppAction(_ actionID: AppActionID) {
-        guard canPerformAppAction(actionID) else { return }
+        guard canPerformAppAction(actionID) else {
+            explainUnavailableAppAction(actionID)
+            return
+        }
 
         switch actionID {
         case .newChat:
@@ -412,6 +444,21 @@ public final class AppModel: ObservableObject {
         }
     }
 
+    private func explainUnavailableAppAction(_ actionID: AppActionID) {
+        guard actionID == .sendPrompt else { return }
+        let prompt = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard submissionRequiresModelAccess(prompt), let message = authAccess.sendPromptUnavailableMessage else { return }
+        statusText = "Model access unavailable"
+        appendLog(title: "prompt blocked", detail: message)
+    }
+
+    private func submissionRequiresModelAccess(_ prompt: String) -> Bool {
+        if case .normalPrompt = SkillSelectionLogic.parseSubmission(prompt) {
+            return true
+        }
+        return false
+    }
+
     public func handleEscapeKey() -> Bool {
         if hasActiveModal {
             closeActiveModal()
@@ -444,10 +491,26 @@ public final class AppModel: ObservableObject {
     }
 
     var canSendPrompt: Bool {
-        !isStreaming &&
-            !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            selectedProject != nil &&
-            !isCreatingNewSession
+        let prompt = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !isStreaming,
+              !prompt.isEmpty,
+              selectedProject != nil,
+              !isCreatingNewSession
+        else { return false }
+
+        return !submissionRequiresModelAccess(prompt) || authAccess.hasAvailableModelAccess
+    }
+
+    func canPerformSubscriptionGatedAction() -> Bool {
+        authAccess.hasActiveSubscriptionAccess
+    }
+
+    @discardableResult
+    func requireSubscriptionAccess(actionName: String) -> Bool {
+        guard let message = authAccess.subscriptionGateUnavailableMessage else { return true }
+        statusText = "Subscription access unavailable"
+        appendLog(title: "subscription action blocked", detail: "action=\(actionName) \(message)")
+        return false
     }
 
     var hasActiveModal: Bool {
@@ -465,7 +528,7 @@ public final class AppModel: ObservableObject {
         } else if isShowingSettings {
             isShowingSettings = false
         } else if isShowingLogin {
-            isShowingLogin = false
+            dismissLoginSheet()
         } else if isShowingModelPicker {
             isShowingModelPicker = false
         } else if isShowingProcessLog {
@@ -485,10 +548,13 @@ public final class AppModel: ObservableObject {
     }
 
     func refreshState() {
-        sendCommand(.getState())
-        sendCommand(.getSessionStats())
-        sendCommand(.getAvailableModels())
-        sendCommand(.getCommands())
+        if !isConnected {
+            start()
+        } else {
+            beginAccessRefresh(reason: "manual refresh")
+            sendCommand(.getSessionStats())
+            sendCommand(.getCommands())
+        }
         refreshGitDetails()
     }
 
@@ -619,7 +685,9 @@ public final class AppModel: ObservableObject {
     func showModelPicker() {
         ensureConnected()
         isShowingModelPicker = true
-        sendCommand(.getAvailableModels())
+        if isConnected {
+            beginAccessRefresh(reason: "model picker")
+        }
     }
 
     func selectModel(_ model: PiModel) {
@@ -636,13 +704,100 @@ public final class AppModel: ObservableObject {
 
     func saveAPIKey(provider: LoginProvider, apiKey: String) throws {
         try NativeAuthStore.saveAPIKey(provider: provider.id, apiKey: apiKey)
+        clearAuthDerivedState(
+            authentication: .authenticated(providerID: provider.id),
+            modelAccess: .refreshing,
+            subscriptionAccess: .refreshing
+        )
         appendLog(title: "saved api key", detail: "Credentials saved to \(NativeAuthStore.authFileURL.path)")
         restartRPC()
     }
 
-    func finishSubscriptionLogin() {
-        appendLog(title: "subscription login", detail: "Login finished; restarting pi RPC")
-        restartRPC()
+    func logout(provider: LoginProvider) {
+        do {
+            if oauthLoginRunner.currentProvider?.id == provider.id, oauthLoginRunner.isRunning {
+                if let attemptID = oauthLoginRunner.currentAttemptID {
+                    handledSubscriptionLoginAttemptIDs.insert(attemptID)
+                }
+                oauthLoginRunner.stop()
+            }
+            try NativeAuthStore.removeCredential(provider: provider.id)
+            clearAuthDerivedState(authentication: authenticationStateFromCredentialStore())
+            appendLog(title: "logged out", detail: "Removed credentials for \(provider.name)")
+            restartRPC()
+        } catch {
+            authAccess.authentication = .failed(message: error.localizedDescription)
+            authAccess.modelAccess = .failed(message: error.localizedDescription)
+            authAccess.subscriptionAccess = .failed(message: error.localizedDescription)
+            statusText = "Logout failed"
+            appendLog(title: "logout failed", detail: error.localizedDescription)
+        }
+    }
+
+    func startSubscriptionLogin(provider: LoginProvider) {
+        clearAuthDerivedState(
+            authentication: .authenticating(providerID: provider.id),
+            modelAccess: .refreshing,
+            subscriptionAccess: .refreshing
+        )
+        statusText = "Login in progress"
+        appendLog(title: "subscription login", detail: "Starting login for \(provider.name)")
+        switch oauthLoginRunner.start(provider: provider) {
+        case .success:
+            break
+        case .failure(let error):
+            completeFailedSubscriptionLogin(provider: provider, message: error.localizedDescription)
+        }
+    }
+
+    func stopSubscriptionLogin() {
+        guard let provider = oauthLoginRunner.currentProvider else {
+            oauthLoginRunner.stop()
+            return
+        }
+        oauthLoginRunner.stop()
+        statusText = "Stopping login"
+        appendLog(title: "subscription login", detail: "Stopping login for \(provider.name)")
+    }
+
+    func dismissLoginSheet() {
+        if oauthLoginRunner.isRunning {
+            stopSubscriptionLogin()
+        } else if let provider = oauthLoginRunner.currentProvider,
+                  let attemptID = oauthLoginRunner.currentAttemptID,
+                  let exitStatus = oauthLoginRunner.exitStatus {
+            completeSubscriptionLogin(provider: provider, attemptID: attemptID, exitStatus: exitStatus)
+        }
+        isShowingLogin = false
+    }
+
+    func completeSubscriptionLogin(provider: LoginProvider, attemptID: UUID, exitStatus: Int32) {
+        guard oauthLoginRunner.currentAttemptID == attemptID else { return }
+        guard handledSubscriptionLoginAttemptIDs.insert(attemptID).inserted else { return }
+        if exitStatus == 0 {
+            clearAuthDerivedState(
+                authentication: .authenticated(providerID: provider.id),
+                modelAccess: .refreshing,
+                subscriptionAccess: .refreshing
+            )
+            appendLog(title: "subscription login", detail: "Login for \(provider.name) finished; restarting pi RPC")
+            restartRPC()
+        } else {
+            completeFailedSubscriptionLogin(provider: provider, message: "Login exited with status \(exitStatus).")
+        }
+    }
+
+    private func completeFailedSubscriptionLogin(provider: LoginProvider, message: String) {
+        accessRefreshTracker.invalidate(
+            state: &authAccess,
+            authentication: .failed(message: message),
+            modelAccess: .unavailable(reason: message),
+            subscriptionAccess: .failed(message: message)
+        )
+        availableModels.removeAll()
+        modelName = "No model"
+        statusText = "Login failed"
+        appendLog(title: "subscription login failed", detail: "provider=\(provider.name) \(message)")
     }
 
     func selectProject(_ project: ProjectItem) {
@@ -1012,11 +1167,68 @@ public final class AppModel: ObservableObject {
         start()
     }
 
-    private func sendCommand(_ command: PiRPCCommand) {
+    private func beginAccessRefresh(reason: String) {
+        guard isConnected else {
+            clearAuthDerivedState(
+                authentication: authenticationStateFromCredentialStore(),
+                modelAccess: .unknown,
+                subscriptionAccess: .unknown
+            )
+            return
+        }
+
+        availableModels.removeAll()
+        modelName = "No model"
+        statusText = "Refreshing access"
+        let commandIDs = accessRefreshTracker.begin(
+            state: &authAccess,
+            credentialSnapshot: NativeAuthStore.credentialSnapshot()
+        )
+        appendLog(title: "access refresh", detail: "reason=\(reason) epoch=\(commandIDs.epoch)")
+
+        let sentState = sendCommand(.getState(id: commandIDs.stateCommandID))
+        let sentModels = sendCommand(.getAvailableModels(id: commandIDs.modelsCommandID))
+        if !sentState || !sentModels {
+            let failedCommands = [
+                sentState ? nil : "get_state",
+                sentModels ? nil : "get_available_models"
+            ].compactMap { $0 }.joined(separator: ", ")
+            _ = accessRefreshTracker.failCurrentRefresh(
+                state: &authAccess,
+                message: "Could not send \(failedCommands)."
+            )
+            statusText = "Access refresh failed"
+        }
+    }
+
+    private func clearAuthDerivedState(
+        authentication: AuthenticationState,
+        modelAccess: ModelAccessState = .unknown,
+        subscriptionAccess: SubscriptionAccessState = .unknown
+    ) {
+        accessRefreshTracker.invalidate(
+            state: &authAccess,
+            authentication: authentication,
+            modelAccess: modelAccess,
+            subscriptionAccess: subscriptionAccess
+        )
+        availableModels.removeAll()
+        modelName = "No model"
+    }
+
+    private func authenticationStateFromCredentialStore() -> AuthenticationState {
+        let snapshot = NativeAuthStore.credentialSnapshot()
+        return snapshot.isEmpty ? .unknown : .authenticated(providerID: snapshot.singleProviderID)
+    }
+
+    @discardableResult
+    private func sendCommand(_ command: PiRPCCommand) -> Bool {
         do {
             try client.send(command)
+            return true
         } catch {
             appendLog(title: "send failed", detail: error.localizedDescription)
+            return false
         }
     }
 
@@ -1072,8 +1284,39 @@ public final class AppModel: ObservableObject {
         sendCommand(command)
     }
 
+    private func piModels(from data: [String: Any]?) -> [PiModel] {
+        let models = data?["models"] as? [[String: Any]] ?? []
+        return models.compactMap { model in
+            guard
+                let provider = PiRPCValue.string(model["provider"]),
+                let modelId = PiRPCValue.string(model["id"])
+            else { return nil }
+            return PiModel(
+                provider: provider,
+                modelId: modelId,
+                name: PiRPCValue.string(model["name"]) ?? modelId
+            )
+        }
+    }
+
     private func handleResponse(_ response: PiRPCResponse) {
         let command = response.command
+        let accessEffect = accessRefreshTracker.handle(response: response, state: &authAccess)
+
+        switch accessEffect {
+        case .ignoredStale:
+            appendLog(title: "ignored stale access refresh", detail: "command=\(command) id=\(response.id ?? "unknown")")
+            return
+        case .failed(let message):
+            availableModels.removeAll()
+            modelName = "No model"
+            statusText = "Access refresh failed"
+            appendLog(title: "access refresh failed", detail: message)
+            return
+        case .notAccessRefresh, .waiting, .completed:
+            break
+        }
+
         if !response.success {
             if command == "get_commands" {
                 availableSkills = []
@@ -1144,18 +1387,18 @@ public final class AppModel: ObservableObject {
             if let level = PiRPCValue.string(data["level"]) {
                 thinkingLevel = level
             }
-        } else if command == "get_available_models", let data = response.data {
-            let models = data["models"] as? [[String: Any]] ?? []
-            availableModels = models.compactMap { model in
-                guard
-                    let provider = PiRPCValue.string(model["provider"]),
-                    let modelId = PiRPCValue.string(model["id"])
-                else { return nil }
-                return PiModel(
-                    provider: provider,
-                    modelId: modelId,
-                    name: PiRPCValue.string(model["name"]) ?? modelId
-                )
+        } else if command == "get_available_models" {
+            switch accessEffect {
+            case .waiting:
+                return
+            case .completed(let models):
+                availableModels = models
+                updateStatusAfterAccessRefresh()
+                return
+            case .notAccessRefresh:
+                availableModels = piModels(from: response.data)
+            case .ignoredStale, .failed:
+                return
             }
         } else if command == "get_commands", let data = response.data {
             guard let commands = data["commands"] as? [[String: Any]] else {
@@ -1178,6 +1421,27 @@ public final class AppModel: ObservableObject {
             }
         } else if command != "prompt" {
             appendLog(title: command, detail: "ok")
+        }
+
+        if case .completed(let models) = accessEffect {
+            availableModels = models
+            updateStatusAfterAccessRefresh()
+        }
+    }
+
+    private func updateStatusAfterAccessRefresh() {
+        guard !isStreaming else { return }
+        switch authAccess.modelAccess {
+        case .available:
+            statusText = "Ready"
+        case .unavailable:
+            statusText = "No model access"
+        case .failed:
+            statusText = "Access refresh failed"
+        case .unknown:
+            statusText = "Model access unknown"
+        case .refreshing:
+            statusText = "Refreshing access"
         }
     }
 

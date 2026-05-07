@@ -184,13 +184,21 @@ _Avoid_: login flag, signed-in boolean
 The access level derived from the latest authenticated provider state that determines whether subscription-required app actions may proceed.
 _Avoid_: paid flag, plan flag
 
+**Model Access**:
+The user's current ability to run model-backed agent interactions from any supported credential source, including API-key credentials and subscription credentials.
+_Avoid_: subscription status, authenticated models
+
 **Access Refresh**:
-A deliberate refresh of **Authentication State** and **Subscription Access** after login, logout, app launch, RPC restart, or user-invoked refresh.
+A deliberate refresh of **Authentication State**, **Model Access**, and **Subscription Access** after login, logout, app launch, RPC restart, or user-invoked refresh.
 _Avoid_: model reload, auth ping
 
 **Subscription-Gated Action**:
 An **App Action** or agent interaction that requires active **Subscription Access** before it can run.
 _Avoid_: premium action, paid action
+
+**Provider Login URL**:
+A URL emitted by a **Provider Login** process that must be opened in the user's browser to continue authentication.
+_Avoid_: redirect text, auth link
 
 **Queued Work**:
 A user-facing prompt-like message accepted by Pi Agent Native while the Pi coding agent is busy and waiting for later delivery to the agent.
@@ -320,10 +328,11 @@ _Avoid_: slash command button, hidden compact command
 - Multiple pending **Selected Skill Chips** can be cleared together.
 - The next normal prompt carries pending **Skills** by prepending a **Skill Instruction** to the prompt sent to the Pi coding agent.
 - Pi Agent Native shows the user's original prompt in the conversation, not the generated **Skill Instruction** prefix.
-- **Authentication State** and **Subscription Access** are separate states.
-- Successful login changes **Authentication State** before **Subscription Access** is trusted.
-- Pi Agent Native must perform an **Access Refresh** before enabling **Subscription-Gated Actions** after login.
-- Logout clears both **Authentication State** and **Subscription Access** so access from a previous account is never shown for a later account.
+- **Authentication State**, **Model Access**, and **Subscription Access** are separate states.
+- Successful login changes **Authentication State** before **Model Access** or **Subscription Access** is trusted.
+- Pi Agent Native must perform an **Access Refresh** before enabling model-backed interactions or **Subscription-Gated Actions** after login.
+- API-key credentials may provide **Model Access** without active **Subscription Access**.
+- Logout clears **Authentication State**, **Model Access**, and **Subscription Access** so access from a previous account is never shown for a later account.
 - Unknown or failed **Subscription Access** must not be treated as active access.
 - **Subscription-Gated Actions** can run only when the latest **Access Refresh** reports active **Subscription Access**.
 - **Queued Work** belongs to the active Pi RPC session and is not native session history.
@@ -504,8 +513,14 @@ _Avoid_: slash command button, hidden compact command
 > **Dev:** "What should happen while subscription access is still being refreshed?"
 > **Domain expert:** "Treat **Subscription Access** as unknown and keep **Subscription-Gated Actions** disabled until the latest refresh completes."
 >
+> **Dev:** "Can API-key credentials enable subscription-only actions if models are available?"
+> **Domain expert:** "No. API-key credentials can provide **Model Access**, but **Subscription-Gated Actions** require active **Subscription Access** from a subscription-backed credential context."
+>
 > **Dev:** "Can logout leave the previous account's subscription status visible?"
-> **Domain expert:** "No. Logout clears both **Authentication State** and **Subscription Access** immediately."
+> **Domain expert:** "No. Logout clears **Authentication State**, **Model Access**, and **Subscription Access** immediately."
+>
+> **Dev:** "If a subscription login prints a URL, is showing it in terminal output enough?"
+> **Domain expert:** "No. A **Provider Login URL** should open in the browser when first detected, while remaining visible for manual reopening."
 >
 > **Dev:** "Should an access refresh error grant access because the user was previously subscribed?"
 > **Domain expert:** "No. Unknown or failed **Subscription Access** is not active access. Show the error without leaving stale access enabled."
@@ -536,7 +551,7 @@ _Avoid_: slash command button, hidden compact command
 - "file picker" in issue 1 could mean a system file dialog. Resolved: this feature is a composer **Mention Picker**, not a modal file chooser.
 - "invoke a skill" in issue 16 could mean immediately executing a skill or selecting it for later use. Resolved: `/skill:<skill-id>` performs **Skill Selection** for the next normal prompt.
 - "concatenate multiple skills" in issue 16 could mean comma lists, mixed text, or repeated tokens. Resolved: the first version supports repeated `/skill:<skill-id>` tokens separated by whitespace.
-- "subscription state" in issue 11 could mean the login process exit status or an independent billing-provider query. Resolved: use **Subscription Access** for the latest access decision and require an **Access Refresh** after credential changes before enabling subscription-gated behavior.
+- "subscription state" in issue 11 could mean the login process exit status, model availability, or an independent billing-provider query. Resolved: use **Model Access** for model-backed availability, use **Subscription Access** for subscription-gated decisions, and require an **Access Refresh** after credential changes before enabling gated behavior.
 - "header buttons" in issue 12 could mean decorative titlebar icons or action controls. Resolved: use **Header Control** for visible header controls that dispatch concrete **App Actions**.
 - The chevrons in issue 12 could mean undefined navigation history. Resolved: they are **Previous Session** and **Next Session**, scoped to the **Project Session List** for the **Selected Project**.
 - "right sidebar" in issue 13 means the **Inspector**, not the left project/session sidebar.
