@@ -58,7 +58,7 @@ Out of scope:
 - **REQ-004**: Inspector visibility shall continue to be stored in `AppModel.isInspectorVisible`.
 - **REQ-005**: The Header Control enabled state shall derive from `AppModel.canPerformAppAction(.toggleInspector)`.
 - **REQ-006**: When an active modal blocks non-modal App Actions, the Inspector Header Control shall be disabled or no-op through centralized action availability.
-- **REQ-007**: The Header Control icon or state shall communicate whether activating it will show or hide the Inspector.
+- **REQ-007**: The Header Control shall communicate whether activating it will show or hide the Inspector through dynamic accessibility text and at least one visible state change, such as distinct tint, selected background, pressed appearance, or distinct SF Symbol. It must not render identical visible states for shown and hidden Inspector states.
 - **REQ-008**: The Header Control shall expose an accessibility label that describes the next action, such as "Hide inspector" when visible and "Show inspector" when hidden.
 - **REQ-009**: The Header Control help text shall include the existing Toggle inspector action name and should include the Command-Option-I keybinding when available from `DefaultKeymap`.
 - **REQ-010**: Hiding the Inspector shall remove the Inspector region from the shell layout so the chat surface expands into the reclaimed horizontal space.
@@ -100,14 +100,15 @@ The implementation shall provide behavior equivalent to:
 Button {
     model.performAppAction(.toggleInspector)
 } label: {
-    Image(systemName: model.isInspectorVisible ? "sidebar.right" : "sidebar.right")
+    Image(systemName: "sidebar.right")
+        .foregroundStyle(model.isInspectorVisible ? Theme.secondaryText : Theme.accent)
 }
 .disabled(!model.canPerformAppAction(.toggleInspector))
 .help(DefaultKeymap.helpText(for: .toggleInspector, title: "Toggle inspector") ?? "Toggle inspector")
 .accessibilityLabel(model.isInspectorVisible ? "Hide inspector" : "Show inspector")
 ```
 
-Exact symbol names and styling may differ, but action routing, centralized availability, discoverability while hidden, and dynamic accessibility labels are required.
+Exact symbol names and styling may differ, but action routing, centralized availability, discoverability while hidden, dynamic accessibility labels, and a visible difference between shown and hidden states are required.
 
 ### State Contract
 
