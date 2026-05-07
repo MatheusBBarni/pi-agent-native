@@ -43,6 +43,8 @@ public final class AppModel: ObservableObject {
     @Published var expandedProjectIDs: Set<ProjectItem.ID> = []
     @Published var sessions: [StoredSession]
     @Published var selectedSessionID: StoredSession.ID?
+    @Published var mentionPickerState: MentionPickerState?
+    @Published var pendingMentionTextReplacement: MentionTextReplacement?
 
     private let client = PiRPCClient()
     private var currentAssistantID: UUID?
@@ -50,6 +52,10 @@ public final class AppModel: ObservableObject {
     private var isCreatingNewSession = false
     private var isSwitchingSession = false
     private var pendingPromptAfterNewSession: String?
+    private var composerSelectionRange = NSRange(location: 0, length: 0)
+    private var mentionIndexCache: [String: [MentionIndexEntry]] = [:]
+    private var mentionIndexTask: Task<Void, Never>?
+    private var mentionIndexLoadingProjectPath: String?
 
     public init() {
         let storedExecutable = UserDefaults.standard.string(forKey: "customExecutablePath")
@@ -157,6 +163,7 @@ public final class AppModel: ObservableObject {
         }
 
         messages.append(ChatMessage(role: .user, title: "You", text: prompt))
+        closeMentionPicker()
         if shouldReplaceGeneratedTitle(sessionTitle) {
             sessionTitle = prompt.truncatedSessionTitle()
             persistCurrentSessionSnapshot()
@@ -196,10 +203,60 @@ public final class AppModel: ObservableObject {
     }
 
     func refreshState() {
+        invalidateMentionIndex(for: selectedProject?.path)
         sendCommand(["id": requestID(), "type": "get_state"])
         sendCommand(["id": requestID(), "type": "get_session_stats"])
         sendCommand(["id": requestID(), "type": "get_available_models"])
         refreshGitDetails()
+    }
+
+    func updateComposerSelection(_ selectedRange: NSRange) {
+        composerSelectionRange = selectedRange
+        refreshMentionPicker()
+    }
+
+    func handleMentionCommand(_ command: MentionPickerCommand) -> Bool {
+        guard mentionPickerState != nil else { return false }
+
+        switch command {
+        case .moveUp:
+            moveMentionHighlight(by: -1)
+        case .moveDown:
+            moveMentionHighlight(by: 1)
+        case .insertHighlighted:
+            insertHighlightedMention()
+        case .dismiss:
+            closeMentionPicker()
+        }
+        return true
+    }
+
+    func highlightMentionResult(_ resultID: MentionSearchResult.ID) {
+        guard var state = mentionPickerState,
+              state.results.contains(where: { $0.id == resultID })
+        else { return }
+
+        state = MentionPickerState(
+            query: state.query,
+            results: state.results,
+            highlightedResultID: resultID,
+            status: state.status
+        )
+        mentionPickerState = state
+    }
+
+    func insertMentionResult(_ resultID: MentionSearchResult.ID) {
+        guard let state = mentionPickerState,
+              let result = state.results.first(where: { $0.id == resultID })
+        else { return }
+
+        insertMention(result)
+    }
+
+    func mentionTextReplacementWasApplied(_ id: UUID) {
+        guard pendingMentionTextReplacement?.id == id else { return }
+        pendingMentionTextReplacement = nil
+        refreshMentionPicker()
     }
 
     func showModelPicker() {
@@ -252,6 +309,7 @@ public final class AppModel: ObservableObject {
     func selectProjectForNewChat(_ project: ProjectItem) {
         persistCurrentSessionSnapshot()
         let shouldRestart = isConnected && workspacePath != project.path
+        resetMentionContext(invalidateProjectAt: project.path)
         selectedProjectID = project.id
         workspacePath = project.path
         expandedProjectIDs.insert(project.id)
@@ -314,6 +372,151 @@ public final class AppModel: ObservableObject {
             }
     }
 
+    private func refreshMentionPicker() {
+        guard pendingMentionTextReplacement == nil,
+              let selectedProject,
+              !selectedProject.path.isEmpty,
+              let query = MentionQueryDetector.activeQuery(in: composerText, selectedRange: composerSelectionRange)
+        else {
+            closeMentionPicker()
+            return
+        }
+
+        let projectPath = selectedProject.path
+        if let entries = mentionIndexCache[projectPath] {
+            applyMentionSearch(entries: entries, query: query)
+            return
+        }
+
+        mentionPickerState = MentionPickerState(
+            query: query,
+            results: [],
+            highlightedResultID: nil,
+            status: .indexing
+        )
+        loadMentionIndexIfNeeded(for: projectPath)
+    }
+
+    private func applyMentionSearch(entries: [MentionIndexEntry], query: MentionQuery) {
+        let results = MentionSearcher.search(entries: entries, query: query)
+        let previousHighlight = mentionPickerState?.highlightedResultID
+        let highlightedID: MentionSearchResult.ID?
+        if let previousHighlight, results.contains(where: { $0.id == previousHighlight }) {
+            highlightedID = previousHighlight
+        } else {
+            highlightedID = results.first?.id
+        }
+
+        mentionPickerState = MentionPickerState(
+            query: query,
+            results: results,
+            highlightedResultID: highlightedID,
+            status: results.isEmpty ? .noMatches : .ready
+        )
+    }
+
+    private func loadMentionIndexIfNeeded(for projectPath: String) {
+        guard mentionIndexLoadingProjectPath != projectPath else { return }
+        mentionIndexTask?.cancel()
+        mentionIndexLoadingProjectPath = projectPath
+        mentionIndexTask = Task.detached(priority: .utility) {
+            let provider = MentionIndexProvider()
+            let result: Result<[MentionIndexEntry], Error>
+            do {
+                result = .success(try provider.entries(forProjectAt: URL(fileURLWithPath: projectPath)))
+            } catch {
+                result = .failure(error)
+            }
+
+            await MainActor.run {
+                self.applyMentionIndexLoadResult(result, projectPath: projectPath)
+            }
+        }
+    }
+
+    private func applyMentionIndexLoadResult(
+        _ result: Result<[MentionIndexEntry], Error>,
+        projectPath: String
+    ) {
+        guard mentionIndexLoadingProjectPath == projectPath else { return }
+        mentionIndexLoadingProjectPath = nil
+        mentionIndexTask = nil
+
+        guard selectedProject?.path == projectPath,
+              let state = mentionPickerState
+        else { return }
+
+        switch result {
+        case .success(let entries):
+            mentionIndexCache[projectPath] = entries
+            applyMentionSearch(entries: entries, query: state.query)
+        case .failure:
+            mentionPickerState = MentionPickerState(
+                query: state.query,
+                results: [],
+                highlightedResultID: nil,
+                status: .unavailable
+            )
+        }
+    }
+
+    private func moveMentionHighlight(by delta: Int) {
+        guard let state = mentionPickerState, !state.results.isEmpty else { return }
+        let currentIndex = state.highlightedResultID.flatMap { id in
+            state.results.firstIndex { $0.id == id }
+        } ?? 0
+        let nextIndex = (currentIndex + delta + state.results.count) % state.results.count
+        mentionPickerState = MentionPickerState(
+            query: state.query,
+            results: state.results,
+            highlightedResultID: state.results[nextIndex].id,
+            status: state.status
+        )
+    }
+
+    private func insertHighlightedMention() {
+        guard let result = mentionPickerState?.highlightedResult else { return }
+        insertMention(result)
+    }
+
+    private func insertMention(_ result: MentionSearchResult) {
+        guard let state = mentionPickerState,
+              let selectedProject,
+              let replacement = MentionInserter.replacement(
+                for: result.entry,
+                query: state.query,
+                in: composerText,
+                projectRoot: URL(fileURLWithPath: selectedProject.path)
+              )
+        else { return }
+
+        pendingMentionTextReplacement = replacement
+        closeMentionPicker()
+    }
+
+    private func closeMentionPicker() {
+        mentionPickerState = nil
+    }
+
+    private func invalidateMentionIndex(for projectPath: String?) {
+        if let projectPath {
+            mentionIndexCache.removeValue(forKey: projectPath)
+        } else {
+            mentionIndexCache.removeAll()
+        }
+        if mentionIndexLoadingProjectPath == projectPath || projectPath == nil {
+            mentionIndexTask?.cancel()
+            mentionIndexTask = nil
+            mentionIndexLoadingProjectPath = nil
+        }
+        closeMentionPicker()
+    }
+
+    private func resetMentionContext(invalidateProjectAt projectPath: String?) {
+        pendingMentionTextReplacement = nil
+        invalidateMentionIndex(for: projectPath)
+    }
+
     private func isRunningSession(_ session: StoredSession) -> Bool {
         session.id == selectedSessionID && (
             isStreaming ||
@@ -341,6 +544,9 @@ public final class AppModel: ObservableObject {
         isSwitchingSession = true
         isCreatingNewSession = false
         if let project = projects.first(where: { $0.path == session.projectPath }) {
+            if workspacePath != project.path {
+                resetMentionContext(invalidateProjectAt: project.path)
+            }
             selectedProjectID = project.id
             if expandProject {
                 expandedProjectIDs.insert(project.id)

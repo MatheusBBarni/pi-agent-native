@@ -142,18 +142,8 @@ struct ComposerView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            PromptTextView(
-                text: $model.composerText,
-                placeholder: "Ask pi to work in this workspace",
-                fontSize: model.uiFontSize,
-                isEditable: !model.isStreaming,
-                onSubmit: model.sendPrompt,
-                onCycleReasoning: model.cycleThinkingLevel
-            )
-            .frame(minHeight: 48, maxHeight: 86)
-            .padding(12)
-            .background(Theme.composerBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            promptEditor
+                .zIndex(1)
 
             HStack(spacing: 12) {
                 Image(systemName: "plus")
@@ -236,9 +226,148 @@ struct ComposerView: View {
             .padding(.horizontal, 10)
         }
         .padding(8)
-        .background(Theme.panelBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Theme.panelBackground)
+        )
         .shadow(color: Color.black.opacity(0.28), radius: 26, x: 0, y: 18)
+    }
+
+    private var promptEditor: some View {
+        PromptTextView(
+            text: $model.composerText,
+            placeholder: "Ask pi to work in this workspace",
+            fontSize: model.uiFontSize,
+            isEditable: !model.isStreaming,
+            pendingTextReplacement: model.pendingMentionTextReplacement,
+            onTextReplacementApplied: model.mentionTextReplacementWasApplied,
+            onSelectionChange: model.updateComposerSelection,
+            onMentionCommand: model.handleMentionCommand,
+            onSubmit: model.sendPrompt,
+            onCycleReasoning: model.cycleThinkingLevel
+        )
+        .frame(minHeight: 48, maxHeight: 86)
+        .padding(12)
+        .background(Theme.composerBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(alignment: .topLeading) {
+            if let state = model.mentionPickerState {
+                MentionPickerView(
+                    state: state,
+                    onHover: model.highlightMentionResult,
+                    onSelect: model.insertMentionResult
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .offset(y: -MentionPickerView.preferredHeight(for: state) - 8)
+            }
+        }
+    }
+}
+
+struct MentionPickerView: View {
+    let state: MentionPickerState
+    let onHover: (MentionSearchResult.ID) -> Void
+    let onSelect: (MentionSearchResult.ID) -> Void
+
+    static func preferredHeight(for state: MentionPickerState) -> CGFloat {
+        let rowCount = max(1, state.results.count)
+        return min(CGFloat(rowCount) * 38 + 10, 322)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if state.status == .ready {
+                ForEach(state.results) { result in
+                    MentionPickerRow(
+                        result: result,
+                        isHighlighted: result.id == state.highlightedResultID
+                    )
+                    .onHover { isHovering in
+                        if isHovering {
+                            onHover(result.id)
+                        }
+                    }
+                    .onTapGesture {
+                        onSelect(result.id)
+                    }
+                }
+            } else {
+                MentionPickerStatusRow(text: statusText)
+            }
+        }
+        .frame(height: Self.preferredHeight(for: state), alignment: .top)
+        .background(Theme.panelBackground)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Theme.border, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .shadow(color: Color.black.opacity(0.22), radius: 18, x: 0, y: 10)
+    }
+
+    private var statusText: String {
+        switch state.status {
+        case .ready:
+            return ""
+        case .indexing:
+            return "Indexing project files..."
+        case .noMatches:
+            return state.query.searchText.isEmpty ? "No project files available" : "No matching files"
+        case .unavailable:
+            return "No project files available"
+        }
+    }
+}
+
+private struct MentionPickerRow: View {
+    let result: MentionSearchResult
+    let isHighlighted: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: result.entry.isDirectory ? "folder" : "doc.text")
+                .frame(width: 18)
+                .foregroundStyle(isHighlighted ? Theme.windowBackground : Theme.tertiaryText)
+
+            Text(result.entry.displayName)
+                .uiFont(size: 13, weight: .medium)
+                .foregroundStyle(isHighlighted ? Theme.windowBackground : Theme.primaryText)
+                .lineLimit(1)
+
+            Spacer(minLength: 12)
+
+            Text(displayPath)
+                .uiFont(size: 12, design: .monospaced)
+                .foregroundStyle(isHighlighted ? Theme.windowBackground.opacity(0.82) : Theme.tertiaryText)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .frame(height: 38)
+        .padding(.horizontal, 10)
+        .background(isHighlighted ? Theme.accent : Color.clear)
+        .contentShape(Rectangle())
+    }
+
+    private var displayPath: String {
+        result.entry.isDirectory ? "\(result.entry.relativePath)/" : result.entry.relativePath
+    }
+}
+
+private struct MentionPickerStatusRow: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(Theme.tertiaryText)
+            Text(text)
+                .uiFont(size: 13)
+                .foregroundStyle(Theme.tertiaryText)
+                .lineLimit(1)
+            Spacer()
+        }
+        .frame(height: 38)
+        .padding(.horizontal, 10)
     }
 }
 
