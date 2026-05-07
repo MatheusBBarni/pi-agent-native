@@ -3,7 +3,6 @@ import AppKit
 
 struct LoginSheetView: View {
     @EnvironmentObject private var model: AppModel
-    @StateObject private var oauthRunner = OAuthLoginRunner()
     @State private var authMethod = AuthMethod.apiKey
     @State private var selectedAPIProvider = LoginProvider.apiKeyProviders.first!
     @State private var selectedSubscriptionProvider = LoginProvider.subscriptionProviders.first!
@@ -12,6 +11,10 @@ struct LoginSheetView: View {
     @State private var errorMessage: String?
     @State private var openedLoginURLs: Set<URL> = []
 
+    private var oauthRunner: OAuthLoginRunner {
+        model.oauthLoginRunner
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
@@ -19,10 +22,7 @@ struct LoginSheetView: View {
                     .uiFont(size: 20, weight: .semibold)
                 Spacer()
                 Button("Done") {
-                    if oauthRunner.exitStatus == 0 {
-                        model.finishSubscriptionLogin()
-                    }
-                    model.isShowingLogin = false
+                    model.dismissLoginSheet()
                 }
             }
 
@@ -31,6 +31,8 @@ struct LoginSheetView: View {
                 Text("Subscription").tag(AuthMethod.subscription)
             }
             .pickerStyle(.segmented)
+
+            AccessStatusSummaryView()
 
             if authMethod == .apiKey {
                 apiKeyPane
@@ -45,6 +47,9 @@ struct LoginSheetView: View {
             guard let url, !openedLoginURLs.contains(url) else { return }
             openedLoginURLs.insert(url)
             NSWorkspace.shared.open(url)
+        }
+        .onDisappear {
+            model.dismissLoginSheet()
         }
     }
 
@@ -79,12 +84,18 @@ struct LoginSheetView: View {
             }
 
             HStack {
+                Button("Logout Provider") {
+                    model.logout(provider: selectedAPIProvider)
+                }
+                .disabled(!NativeAuthStore.hasCredential(provider: selectedAPIProvider.id))
+
                 Spacer()
+
                 Button("Save API Key") {
                     do {
                         try model.saveAPIKey(provider: selectedAPIProvider, apiKey: apiKey)
                         apiKey = ""
-                        model.isShowingLogin = false
+                        model.dismissLoginSheet()
                     } catch {
                         errorMessage = error.localizedDescription
                     }
@@ -109,7 +120,7 @@ struct LoginSheetView: View {
             HStack {
                 Button(oauthRunner.isRunning ? "Running..." : "Start Login") {
                     openedLoginURLs.removeAll()
-                    oauthRunner.start(provider: selectedSubscriptionProvider)
+                    model.startSubscriptionLogin(provider: selectedSubscriptionProvider)
                 }
                 .disabled(oauthRunner.isRunning)
 
@@ -119,10 +130,15 @@ struct LoginSheetView: View {
                     }
                 }
 
+                Button("Logout Provider") {
+                    model.logout(provider: selectedSubscriptionProvider)
+                }
+                .disabled(oauthRunner.isRunning || !NativeAuthStore.hasCredential(provider: selectedSubscriptionProvider.id))
+
                 Spacer()
 
                 Button("Stop") {
-                    oauthRunner.stop()
+                    model.stopSubscriptionLogin()
                 }
                 .disabled(!oauthRunner.isRunning)
             }
@@ -158,6 +174,51 @@ struct LoginSheetView: View {
                 .disabled(terminalInput.isEmpty)
             }
         }
+    }
+}
+
+private struct AccessStatusSummaryView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .uiFont(size: 13, weight: .semibold)
+                .foregroundStyle(Theme.primaryText)
+            Text(detail)
+                .uiFont(size: 12)
+                .foregroundStyle(Theme.secondaryText)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panelBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var title: String {
+        switch model.authAccess.authentication {
+        case .unknown:
+            return "Authentication not checked"
+        case .unauthenticated:
+            return "Not logged in"
+        case .authenticating(let providerID):
+            return "Logging in to \(providerID)"
+        case .authenticated(let providerID):
+            return "Authenticated\(providerID.map { " with \($0)" } ?? "")"
+        case .failed:
+            return "Authentication error"
+        }
+    }
+
+    private var detail: String {
+        let modelMessage = model.authAccess.modelAccess.unavailableMessage
+        let subscriptionMessage = model.authAccess.subscriptionAccess.unavailableMessage
+        if model.authAccess.hasAvailableModelAccess {
+            return model.authAccess.hasActiveSubscriptionAccess
+                ? "Model access and subscription access are active."
+                : "Model access is active. \(subscriptionMessage)"
+        }
+        return "\(modelMessage) \(subscriptionMessage)"
     }
 }
 
@@ -199,9 +260,9 @@ struct ModelPickerSheetView: View {
 
             if filteredModels.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("No authenticated models found.")
+                    Text(emptyTitle)
                         .uiFont(size: 14, weight: .medium)
-                    Text("Use Login to add an API key or subscription, then refresh.")
+                    Text(emptyDetail)
                         .uiFont(size: 13)
                         .foregroundStyle(Theme.secondaryText)
                 }
@@ -230,5 +291,19 @@ struct ModelPickerSheetView: View {
         .padding(22)
         .frame(width: 620, height: 460)
         .background(Theme.windowBackground)
+    }
+
+    private var emptyTitle: String {
+        if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !model.availableModels.isEmpty {
+            return "No models match your search"
+        }
+        return model.authAccess.modelPickerEmptyTitle
+    }
+
+    private var emptyDetail: String {
+        if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !model.availableModels.isEmpty {
+            return "Try a different provider, model name, or model id."
+        }
+        return model.authAccess.modelPickerEmptyDetail
     }
 }

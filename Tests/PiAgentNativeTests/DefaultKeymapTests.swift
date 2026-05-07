@@ -84,6 +84,7 @@ final class DefaultKeymapTests: XCTestCase {
         model.selectedProjectID = model.projects[0].id
         model.workspacePath = model.projects[0].path
         model.composerText = "Build the keymap"
+        model.authAccess.modelAccess = .available(providerID: "openai")
 
         XCTAssertTrue(model.canPerformAppAction(.sendPrompt))
 
@@ -98,6 +99,59 @@ final class DefaultKeymapTests: XCTestCase {
         XCTAssertTrue(model.handleEscapeKey())
         XCTAssertFalse(model.isShowingSettings)
         XCTAssertTrue(model.isStreaming)
+    }
+
+    @MainActor
+    func testPromptAvailabilityRequiresModelAccessButAllowsSkillSelection() {
+        let model = AppModel()
+        model.projects = [ProjectItem(name: "Repo", path: "/tmp/repo")]
+        model.selectedProjectID = model.projects[0].id
+        model.workspacePath = model.projects[0].path
+
+        model.composerText = "Write code"
+        model.authAccess.modelAccess = .refreshing
+        XCTAssertFalse(model.canPerformAppAction(.sendPrompt))
+
+        model.composerText = "/skill:swiftui"
+        XCTAssertTrue(model.canPerformAppAction(.sendPrompt))
+    }
+
+    @MainActor
+    func testDismissRunningSubscriptionLoginWaitsForActualExitStatus() {
+        let model = AppModel()
+        let provider = LoginProvider(id: "openai-codex", name: "ChatGPT / OpenAI Codex")
+        let attemptID = UUID()
+        model.isShowingLogin = true
+        model.oauthLoginRunner.currentProvider = provider
+        model.oauthLoginRunner.currentAttemptID = attemptID
+        model.oauthLoginRunner.isRunning = true
+        model.authAccess.authentication = .authenticating(providerID: provider.id)
+
+        model.dismissLoginSheet()
+
+        XCTAssertFalse(model.isShowingLogin)
+        XCTAssertEqual(model.statusText, "Stopping login")
+        XCTAssertEqual(model.authAccess.authentication, .authenticating(providerID: provider.id))
+
+        model.completeSubscriptionLogin(provider: provider, attemptID: attemptID, exitStatus: 0)
+
+        XCTAssertTrue(model.eventLog.contains { entry in
+            entry.title == "subscription login" && entry.detail.contains("finished; restarting pi RPC")
+        })
+    }
+
+    @MainActor
+    func testSubscriptionGateFailsClosedWithStatusReason() {
+        let model = AppModel()
+        model.authAccess.subscriptionAccess = .refreshing
+
+        XCTAssertFalse(model.canPerformSubscriptionGatedAction())
+        XCTAssertFalse(model.requireSubscriptionAccess(actionName: "Test Action"))
+        XCTAssertEqual(model.statusText, "Subscription access unavailable")
+
+        model.authAccess.subscriptionAccess = .active(providerID: "openai-codex")
+        XCTAssertTrue(model.canPerformSubscriptionGatedAction())
+        XCTAssertTrue(model.requireSubscriptionAccess(actionName: "Test Action"))
     }
 
     @MainActor
