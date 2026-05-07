@@ -25,6 +25,8 @@ public struct AppShellView: View {
                         .frame(width: 280)
                 }
             }
+            .disabled(model.hasActiveModal)
+            .accessibilityHidden(model.hasActiveModal)
 
             if model.isShowingLogin {
                 ModalBackdrop {
@@ -225,20 +227,76 @@ struct ProjectSidebarRow: View {
 }
 
 struct SidebarTitlebarControls: View {
+    @EnvironmentObject private var model: AppModel
+
     var body: some View {
         HStack(spacing: 10) {
             Spacer()
-            Image(systemName: "sidebar.left")
-                .foregroundStyle(Theme.tertiaryText)
-            Image(systemName: "chevron.left")
-                .foregroundStyle(Theme.tertiaryText)
-                .padding(.leading, 16)
-            Image(systemName: "chevron.right")
-                .foregroundStyle(Theme.tertiaryText)
+            HeaderIconButton(
+                systemImage: "sidebar.left",
+                title: "Toggle sidebar",
+                actionID: .toggleSidebar,
+                isEnabled: model.canPerformAppAction(.toggleSidebar),
+                disabledHelp: "Close active modal first"
+            ) {
+                model.performAppAction(.toggleSidebar)
+            }
+            HeaderIconButton(
+                systemImage: "chevron.left",
+                title: "Previous session",
+                isEnabled: model.canNavigateToPreviousSession(),
+                disabledHelp: model.previousSessionHelpText()
+            ) {
+                model.navigateToPreviousSession()
+            }
+            .padding(.leading, 16)
+            HeaderIconButton(
+                systemImage: "chevron.right",
+                title: "Next session",
+                isEnabled: model.canNavigateToNextSession(),
+                disabledHelp: model.nextSessionHelpText()
+            ) {
+                model.navigateToNextSession()
+            }
         }
         .uiFont(size: 14, weight: .medium)
         .padding(.horizontal, 14)
         .padding(.leading, 98)
+    }
+}
+
+struct HeaderIconButton: View {
+    let systemImage: String
+    let title: String
+    var actionID: AppActionID?
+    var isEnabled: Bool
+    var disabledHelp: String?
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .frame(width: 16, height: 18)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .foregroundStyle(isEnabled ? Theme.tertiaryText : Theme.tertiaryText.opacity(0.45))
+        .help(helpText)
+        .accessibilityLabel(title)
+        .accessibilityHint(helpText)
+    }
+
+    private var helpText: String {
+        if !isEnabled, let disabledHelp {
+            return disabledHelp
+        }
+
+        if let actionID {
+            return DefaultKeymap.helpText(for: actionID, title: title) ?? title
+        }
+
+        return title
     }
 }
 

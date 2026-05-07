@@ -199,9 +199,6 @@ struct ComposerView: View {
                 .zIndex(1)
 
             HStack(spacing: 12) {
-                Image(systemName: "plus")
-                    .foregroundStyle(Theme.secondaryText)
-
                 Menu {
                     if model.projects.isEmpty {
                         Text("No projects")
@@ -219,14 +216,20 @@ struct ComposerView: View {
                         }
                     }
                 } label: {
-                    Text(model.selectedProject?.name ?? "Select project")
-                        .uiFont(size: 13, weight: .medium)
-                        .foregroundStyle(model.selectedProject == nil ? Theme.tertiaryText : Theme.secondaryText)
-                        .lineLimit(1)
+                    HStack(spacing: 12) {
+                        Image(systemName: "plus")
+                            .foregroundStyle(Theme.secondaryText)
+                        Text(model.selectedProject?.name ?? "Select project")
+                            .uiFont(size: 13, weight: .medium)
+                            .foregroundStyle(model.selectedProject == nil ? Theme.tertiaryText : Theme.secondaryText)
+                            .lineLimit(1)
+                    }
                 }
                 .menuStyle(.borderlessButton)
-                .disabled(model.projects.isEmpty || model.isStreaming)
-                .help("Select project for new chat")
+                .disabled(!canSelectProjectForNewChat)
+                .help(projectSelectionHelpText)
+                .accessibilityLabel("Select project for new chat")
+                .accessibilityHint(projectSelectionHelpText)
 
                 Spacer()
 
@@ -236,17 +239,24 @@ struct ComposerView: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .buttonStyle(IconButtonStyle())
-                .help(DefaultKeymap.helpText(for: .refreshState) ?? "Refresh state")
+                .disabled(!model.canPerformAppAction(.refreshState))
+                .help(refreshStateHelpText)
+                .accessibilityLabel("Refresh state")
+                .accessibilityHint(refreshStateHelpText)
 
                 Button {
                     model.showModelPicker()
                 } label: {
                     Text(model.modelName)
                         .uiFont(size: 13)
-                        .foregroundStyle(Theme.secondaryText)
+                        .foregroundStyle(model.hasActiveModal ? Theme.tertiaryText : Theme.secondaryText)
                         .lineLimit(1)
                 }
                 .buttonStyle(.plain)
+                .disabled(model.hasActiveModal)
+                .help(modelPickerHelpText)
+                .accessibilityLabel("Select model")
+                .accessibilityHint(modelPickerHelpText)
 
                 Menu {
                     ForEach(["off", "minimal", "low", "medium", "high", "xhigh"], id: \.self) { level in
@@ -260,7 +270,10 @@ struct ComposerView: View {
                         .foregroundStyle(Theme.tertiaryText)
                 }
                 .menuStyle(.borderlessButton)
-                .help(DefaultKeymap.helpText(for: .cycleThinkingLevel) ?? "Cycle thinking level")
+                .disabled(model.hasActiveModal)
+                .help(thinkingLevelHelpText)
+                .accessibilityLabel("Thinking level")
+                .accessibilityHint(thinkingLevelHelpText)
 
                 Button {
                     model.performAppAction(model.isStreaming ? .stopGeneration : .sendPrompt)
@@ -273,8 +286,10 @@ struct ComposerView: View {
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .disabled(!model.isStreaming && !model.canSendPrompt)
+                .disabled(!canActivateSendButton)
                 .help(sendButtonHelp)
+                .accessibilityLabel(model.isStreaming ? "Stop generation" : "Send prompt")
+                .accessibilityHint(sendButtonHelp)
             }
             .padding(.horizontal, 10)
         }
@@ -284,6 +299,26 @@ struct ComposerView: View {
                 .fill(Theme.panelBackground)
         )
         .shadow(color: Color.black.opacity(0.28), radius: 26, x: 0, y: 18)
+    }
+
+    private var canSelectProjectForNewChat: Bool {
+        !model.projects.isEmpty && !model.isStreaming && !model.hasActiveModal
+    }
+
+    private var projectSelectionHelpText: String {
+        if model.hasActiveModal {
+            return "Close active modal first"
+        }
+
+        if model.isStreaming {
+            return "Stop generation first"
+        }
+
+        if model.projects.isEmpty {
+            return "Open a project first"
+        }
+
+        return "Select project for new chat"
     }
 
     private var promptEditor: some View {
@@ -332,10 +367,59 @@ struct ComposerView: View {
         }
     }
 
+    private var refreshStateHelpText: String {
+        if model.canPerformAppAction(.refreshState) {
+            return DefaultKeymap.helpText(for: .refreshState) ?? "Refresh state"
+        }
+
+        if model.hasActiveModal {
+            return "Close active modal first"
+        }
+
+        return "Open a project first"
+    }
+
+    private var modelPickerHelpText: String {
+        model.hasActiveModal ? "Close active modal first" : "Select model"
+    }
+
+    private var thinkingLevelHelpText: String {
+        if model.hasActiveModal {
+            return "Close active modal first"
+        }
+
+        return DefaultKeymap.helpText(for: .cycleThinkingLevel) ?? "Cycle thinking level"
+    }
+
+    private var canActivateSendButton: Bool {
+        if model.isStreaming {
+            return model.canPerformAppAction(.stopGeneration)
+        }
+
+        return model.canPerformAppAction(.sendPrompt)
+    }
+
     private var sendButtonHelp: String {
+        if model.hasActiveModal {
+            return "Close active modal first"
+        }
+
         if model.isStreaming {
             return DefaultKeymap.helpText(for: .stopGeneration) ?? "Stop generation"
         }
+
+        if !model.canPerformAppAction(.sendPrompt) {
+            if model.selectedProject == nil {
+                return "Open a project first"
+            }
+
+            if model.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return "Enter a prompt first"
+            }
+
+            return "Wait for the new session to be ready"
+        }
+
         return DefaultKeymap.helpText(for: .sendPrompt) ?? "Send prompt"
     }
 }
