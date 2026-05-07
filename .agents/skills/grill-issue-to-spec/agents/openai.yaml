@@ -1,0 +1,4 @@
+interface:
+  display_name: "Grill Issue To Spec"
+  short_description: "Grill an issue, write a spec, update labels"
+  default_prompt: "Use $grill-issue-to-spec for issue <issue_number>."
