@@ -209,6 +209,10 @@ struct AuthAccessRefreshTracker: Equatable {
     private var pending: PendingAccessRefresh?
     private var commandEpochs: [String: Int] = [:]
 
+    var trackedCommandCount: Int {
+        commandEpochs.count
+    }
+
     mutating func begin(
         state: inout AuthAccessState,
         credentialSnapshot: AuthCredentialSnapshot,
@@ -216,6 +220,7 @@ struct AuthAccessRefreshTracker: Equatable {
         stateCommandID: String = UUID().uuidString,
         modelsCommandID: String = UUID().uuidString
     ) -> AccessRefreshCommandIDs {
+        pruneTrackedCommands()
         let epoch = state.refreshEpoch + 1
         state.authentication = credentialSnapshot.isEmpty ? .unknown : .authenticated(providerID: credentialSnapshot.singleProviderID)
         state.modelAccess = .refreshing
@@ -248,6 +253,7 @@ struct AuthAccessRefreshTracker: Equatable {
         now: Date = Date()
     ) {
         pending = nil
+        pruneTrackedCommands()
         state.authentication = authentication
         state.modelAccess = modelAccess
         state.subscriptionAccess = subscriptionAccess
@@ -262,6 +268,7 @@ struct AuthAccessRefreshTracker: Equatable {
         now: Date = Date()
     ) -> AccessRefreshResponseEffect {
         guard pending != nil else { return .notAccessRefresh }
+        pruneTrackedCommands()
         pending = nil
         state.authentication = .failed(message: message)
         state.modelAccess = .failed(message: message)
@@ -284,15 +291,18 @@ struct AuthAccessRefreshTracker: Equatable {
         guard var current = pending,
               current.epoch == epoch
         else {
+            commandEpochs.removeValue(forKey: responseID)
             return .ignoredStale
         }
 
         guard responseID == current.stateCommandID || responseID == current.modelsCommandID else {
+            commandEpochs.removeValue(forKey: responseID)
             return .ignoredStale
         }
 
         guard response.success else {
             let message = response.error ?? "\(response.command) failed"
+            pruneTrackedCommands(for: current)
             pending = nil
             state.authentication = .failed(message: message)
             state.modelAccess = .failed(message: message)
@@ -303,10 +313,12 @@ struct AuthAccessRefreshTracker: Equatable {
 
         if responseID == current.stateCommandID {
             current.receivedState = true
+            commandEpochs.removeValue(forKey: responseID)
         }
 
         if responseID == current.modelsCommandID {
             current.receivedModels = Self.models(from: response.data)
+            commandEpochs.removeValue(forKey: responseID)
         }
 
         guard current.receivedState, let models = current.receivedModels else {
@@ -314,6 +326,7 @@ struct AuthAccessRefreshTracker: Equatable {
             return .waiting
         }
 
+        pruneTrackedCommands(for: current)
         pending = nil
         applySuccessfulRefresh(
             models: models,
@@ -322,6 +335,15 @@ struct AuthAccessRefreshTracker: Equatable {
             now: now
         )
         return .completed(models: models)
+    }
+
+    private mutating func pruneTrackedCommands() {
+        commandEpochs.removeAll(keepingCapacity: true)
+    }
+
+    private mutating func pruneTrackedCommands(for refresh: PendingAccessRefresh) {
+        commandEpochs.removeValue(forKey: refresh.stateCommandID)
+        commandEpochs.removeValue(forKey: refresh.modelsCommandID)
     }
 
     private static func models(from data: [String: Any]?) -> [PiModel] {

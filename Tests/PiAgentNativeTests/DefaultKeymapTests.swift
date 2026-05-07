@@ -141,6 +141,24 @@ final class DefaultKeymapTests: XCTestCase {
     }
 
     @MainActor
+    func testSupersededSubscriptionLoginCompletionIsIgnored() {
+        let model = AppModel()
+        let provider = LoginProvider(id: "openai-codex", name: "ChatGPT / OpenAI Codex")
+        let oldAttemptID = UUID()
+        let currentAttemptID = UUID()
+        model.oauthLoginRunner.currentProvider = provider
+        model.oauthLoginRunner.currentAttemptID = currentAttemptID
+        model.authAccess.authentication = .authenticating(providerID: provider.id)
+
+        model.completeSubscriptionLogin(provider: provider, attemptID: oldAttemptID, exitStatus: 0)
+
+        XCTAssertEqual(model.authAccess.authentication, .authenticating(providerID: provider.id))
+        XCTAssertFalse(model.eventLog.contains { entry in
+            entry.title == "subscription login" && entry.detail.contains("finished; restarting pi RPC")
+        })
+    }
+
+    @MainActor
     func testSubscriptionGateFailsClosedWithStatusReason() {
         let model = AppModel()
         model.authAccess.subscriptionAccess = .refreshing

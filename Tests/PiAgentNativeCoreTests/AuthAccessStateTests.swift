@@ -23,17 +23,20 @@ final class AuthAccessStateTests: XCTestCase {
         XCTAssertEqual(ids.epoch, 1)
         XCTAssertEqual(state.modelAccess, .refreshing)
         XCTAssertEqual(state.subscriptionAccess, .refreshing)
+        XCTAssertEqual(tracker.trackedCommandCount, 2)
 
         XCTAssertEqual(
             tracker.handle(response: response(id: "models-a", command: "get_available_models", data: modelsData(provider: "openai")), state: &state),
             .waiting
         )
         XCTAssertEqual(state.modelAccess, .refreshing)
+        XCTAssertEqual(tracker.trackedCommandCount, 1)
 
         XCTAssertEqual(
             tracker.handle(response: response(id: "state-a", command: "get_state"), state: &state),
             .completed(models: [PiModel(provider: "openai", modelId: "gpt-5", name: "GPT-5")])
         )
+        XCTAssertEqual(tracker.trackedCommandCount, 0)
         XCTAssertEqual(state.authentication, .authenticated(providerID: "openai"))
         XCTAssertEqual(state.modelAccess, .available(providerID: "openai"))
         XCTAssertEqual(
@@ -109,13 +112,14 @@ final class AuthAccessStateTests: XCTestCase {
 
         XCTAssertEqual(
             tracker.handle(response: response(id: "state-old", command: "get_state"), state: &state),
-            .ignoredStale
+            .notAccessRefresh
         )
         XCTAssertEqual(
             tracker.handle(response: response(id: "models-old", command: "get_available_models", data: modelsData(provider: "anthropic")), state: &state),
-            .ignoredStale
+            .notAccessRefresh
         )
         XCTAssertEqual(state, expected)
+        XCTAssertEqual(tracker.trackedCommandCount, 0)
     }
 
     func testVeryLateTrackedRefreshResponsesStayIgnoredAfterManyNewerRefreshes() {
@@ -145,9 +149,10 @@ final class AuthAccessStateTests: XCTestCase {
 
         XCTAssertEqual(
             tracker.handle(response: response(id: "models-very-old", command: "get_available_models", data: modelsData(provider: "anthropic")), state: &state),
-            .ignoredStale
+            .notAccessRefresh
         )
         XCTAssertEqual(state, expected)
+        XCTAssertEqual(tracker.trackedCommandCount, 0)
     }
 
     func testRefreshFailureClearsPreviousActiveAccess() {
@@ -174,6 +179,31 @@ final class AuthAccessStateTests: XCTestCase {
         XCTAssertEqual(state.authentication, .failed(message: "network down"))
         XCTAssertEqual(state.modelAccess, .failed(message: "network down"))
         XCTAssertEqual(state.subscriptionAccess, .failed(message: "network down"))
+        XCTAssertEqual(tracker.trackedCommandCount, 0)
+        XCTAssertEqual(
+            tracker.handle(response: response(id: "state-d", command: "get_state"), state: &state),
+            .notAccessRefresh
+        )
+    }
+
+    func testInvalidationPrunesAccessRefreshCommandIDs() {
+        var state = AuthAccessState()
+        var tracker = AuthAccessRefreshTracker()
+        _ = tracker.begin(
+            state: &state,
+            credentialSnapshot: AuthCredentialSnapshot(credentialsByProvider: ["anthropic": .oauth]),
+            stateCommandID: "state-invalidated",
+            modelsCommandID: "models-invalidated"
+        )
+        XCTAssertEqual(tracker.trackedCommandCount, 2)
+
+        tracker.invalidate(state: &state, authentication: .unauthenticated)
+
+        XCTAssertEqual(tracker.trackedCommandCount, 0)
+        XCTAssertEqual(
+            tracker.handle(response: response(id: "state-invalidated", command: "get_state"), state: &state),
+            .notAccessRefresh
+        )
     }
 
     func testNativeAuthStoreSnapshotAndRemovalPreserveOtherProviders() throws {

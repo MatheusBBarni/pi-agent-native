@@ -160,6 +160,7 @@ final class OAuthLoginRunner: ObservableObject {
             let stderrRemainder = stderrPipe.fileHandleForReading.readDataToEndOfFile()
             DispatchQueue.main.async {
                 guard let self else { return }
+                guard self.currentAttemptID == attemptID else { return }
                 self.append(stdoutRemainder)
                 self.append(stderrRemainder)
                 self.detectFinalLoginURL()
