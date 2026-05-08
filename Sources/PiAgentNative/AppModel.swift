@@ -184,15 +184,16 @@ public final class AppModel: ObservableObject {
         let storedThemeVariant = UserDefaults.standard.string(forKey: "themeVariant").flatMap(AppThemeVariant.init(rawValue:))
         let legacyThemeMode = UserDefaults.standard.string(forKey: "themeMode").flatMap(AppThemeVariant.init(rawValue:))
         let persistedState = SessionStore.load()
-        let persistedProjects = Self.sanitizePersistedProjects(persistedState.projects)
-        let persistedSessionProjectPaths = Set(persistedProjects.map(\.path))
-        let persistedSessions = persistedState.sessions.filter { persistedSessionProjectPaths.contains($0.projectPath) }
+        let persistedProjects = Self.normalizePersistedProjects(persistedState.projects)
+        let persistedProjectIDs = Set(persistedProjects.map(\.id))
+        let persistedSessions = persistedState.sessions.filter { persistedProjectIDs.contains($0.projectID) }
+        let persistedSelectedProjectID = persistedProjects.first(where: { $0.id == persistedState.selectedProjectID })?.id
         let persistedSelectedSessionID = persistedSessions.first(where: { $0.id == persistedState.selectedSessionID })?.id
 
         settingsStore = SettingsStore(customExecutablePath: storedExecutable ?? "")
         workspaceStore = WorkspaceStore(
             projects: persistedProjects,
-            selectedProjectPath: persistedState.selectedProjectPath,
+            selectedProjectID: persistedSelectedProjectID,
             availableExternalTargets: ExternalTargetScanner().scan()
         )
         sessionIndexStore = NativeSessionIndexStore(
@@ -208,15 +209,16 @@ public final class AppModel: ObservableObject {
         themeVariant = storedThemeVariant ?? legacyThemeMode ?? .dark
         applyLocalizedInitialState()
 
-        if let selectedProjectPath = persistedState.selectedProjectPath,
-           selectedProjectID != nil {
+        if let selectedProjectID = persistedSelectedProjectID,
+           let selectedProject = workspaceStore.selectedProject {
             let selectedSession = selectedSessionID.flatMap { id in
                 persistedSessions.first { $0.id == id }
             }
-            if selectedSession?.projectPath != selectedProjectPath {
+            if selectedSession?.projectID != selectedProjectID {
                 selectedSessionID = NativeSessionIndexStore.lastOpenedSession(
                     in: persistedSessions,
-                    projectPath: selectedProjectPath
+                    projectID: selectedProjectID,
+                    projectPath: selectedProject.path
                 )?.id
             }
         }
@@ -291,12 +293,11 @@ public final class AppModel: ObservableObject {
             .store(in: &storeCancellables)
     }
 
-    private static func sanitizePersistedProjects(_ persistedProjects: [ProjectItem]) -> [ProjectItem] {
+    private static func normalizePersistedProjects(_ persistedProjects: [ProjectItem]) -> [ProjectItem] {
         var seenPaths = Set<String>()
         return persistedProjects.compactMap { item in
             let normalizedPath = URL(fileURLWithPath: item.path).standardized.path
             guard !normalizedPath.isEmpty,
-                  isExistingDirectory(normalizedPath),
                   !seenPaths.contains(normalizedPath)
             else {
                 return nil
@@ -310,11 +311,6 @@ public final class AppModel: ObservableObject {
             }
             return normalizedItem
         }
-    }
-
-    private static func isExistingDirectory(_ path: String) -> Bool {
-        var isDirectory: ObjCBool = false
-        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 
     var skillPickerState: SkillPickerState? {
@@ -1440,9 +1436,56 @@ public final class AppModel: ObservableObject {
         workspaceStore.toggle(project)
     }
 
+    func switchSidebarSession(_ session: StoredSession, in project: ProjectItem) {
+        guard project.isAvailable else {
+            statusText = "Project unavailable"
+            return
+        }
+
+        switchSession(session)
+    }
+
     func addProject(path: String) {
         let project = workspaceStore.addProject(path: path)
         selectProject(project)
+    }
+
+    func removeSidebarStaleProject(_ project: ProjectItem) {
+        removeStaleProject(project)
+    }
+
+    func removeStaleProject(_ project: ProjectItem) {
+        guard project.availability == .stale else { return }
+        removeLocalProjectRecord(project)
+    }
+
+    func removeLocalProjectRecord(_ project: ProjectItem) {
+        let wasSelectedProject = selectedProjectID == project.id
+        let wasConnectedToRemovedProject = wasSelectedProject && isConnected
+        guard let removedProject = workspaceStore.removeProject(id: project.id) else { return }
+
+        sessionIndexStore.removeSessions(forProjectID: removedProject.id)
+
+        if wasSelectedProject {
+            if wasConnectedToRemovedProject {
+                stop()
+            }
+            resetMentionContext(invalidateProjectAt: removedProject.path)
+            conversationStore.clear()
+            toolActivityStore.clear()
+            clearQueuedWork()
+            sessionTitle = "New chat"
+            statusText = "Open a project"
+            isCreatingNewSession = false
+            isSwitchingSession = false
+            pendingPromptAfterNewSession = nil
+            clearSkillSelectionState(clearAvailableSkills: wasConnectedToRemovedProject)
+        }
+
+        appendLog(title: "removed project record", detail: "projectID=\(removedProject.id) path=\(removedProject.path)")
+        persistState()
+        refreshGitDetails()
+        refreshRepositoryChangeSnapshot()
     }
 
     func openExternally(_ target: AvailableExternalTarget) {
@@ -1794,7 +1837,9 @@ public final class AppModel: ObservableObject {
         clearQueuedWork(waitForContextRefresh: true)
         isSwitchingSession = true
         isCreatingNewSession = false
-        if let project = projects.first(where: { $0.path == session.projectPath }) {
+        let owningProject = projects.first { $0.id == session.projectID }
+            ?? projects.first { $0.path == session.projectPath }
+        if let project = owningProject {
             if workspacePath != project.path {
                 resetMentionContext(invalidateProjectAt: project.path)
             }
@@ -2246,10 +2291,10 @@ public final class AppModel: ObservableObject {
             return true
         }
         if isSwitchingSession {
-            return sessionID == selectedSessionID
+            return selectedSessionMatchesPiSessionID(sessionID)
         }
-        if let selectedSessionID {
-            return sessionID == selectedSessionID
+        if selectedSessionID != nil {
+            return selectedSessionMatchesPiSessionID(sessionID)
         }
         return selectedProject != nil
     }
@@ -2265,18 +2310,22 @@ public final class AppModel: ObservableObject {
             return true
         }
 
-        guard let selectedSessionID else {
+        guard selectedSessionID != nil else {
             return false
         }
 
-        return sessionID == selectedSessionID
+        return selectedSessionMatchesPiSessionID(sessionID)
+    }
+
+    private func selectedSessionMatchesPiSessionID(_ piSessionID: String) -> Bool {
+        selectedSession?.piSessionID == piSessionID
     }
 
     private func persistState() {
         SessionStore.save(AppPersistedState(
             projects: projects,
             sessions: sessions,
-            selectedProjectPath: selectedProject?.path,
+            selectedProjectID: selectedProjectID,
             selectedSessionID: selectedSessionID
         ))
     }

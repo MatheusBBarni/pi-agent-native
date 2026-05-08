@@ -115,6 +115,8 @@ final class QueuedWorkDisplayStateTests: XCTestCase {
         let project = ProjectItem(id: "project-1", name: "Repo", path: "/tmp/repo")
         let session = StoredSession(
             id: "session-2",
+            piSessionID: "pi-session-2",
+            projectID: project.id,
             projectPath: project.path,
             projectName: project.name,
             title: "Target",

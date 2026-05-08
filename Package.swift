@@ -23,6 +23,9 @@ let package = Package(
             path: "Sources/PiAgentNative",
             resources: [
                 .process("Resources")
+            ],
+            linkerSettings: [
+                .linkedLibrary("sqlite3")
             ]
         ),
         .executableTarget(

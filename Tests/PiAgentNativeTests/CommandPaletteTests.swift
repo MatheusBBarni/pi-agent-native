@@ -2,6 +2,24 @@ import XCTest
 @testable import PiAgentNativeCore
 
 final class CommandPaletteTests: XCTestCase {
+    private var temporaryURLs: [URL] = []
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        SessionStore.databaseURLForTesting = temporaryDirectoryURL().appendingPathComponent("sessions.sqlite")
+    }
+
+    override func tearDownWithError() throws {
+        SessionStore.databaseURLForTesting = nil
+
+        for url in temporaryURLs {
+            try? FileManager.default.removeItem(at: url)
+        }
+        temporaryURLs.removeAll()
+
+        try super.tearDownWithError()
+    }
+
     @MainActor
     func testOpenCommandPaletteUsesModalRulesAndPreservesComposerText() {
         let model = AppModel()
@@ -72,6 +90,8 @@ final class CommandPaletteTests: XCTestCase {
         let project = ProjectItem(id: "project-a", name: "Repo", path: "/tmp/repo")
         let session = StoredSession(
             id: "session-a",
+            piSessionID: "pi-session-a",
+            projectID: project.id,
             projectPath: project.path,
             projectName: project.name,
             title: "Fix auth",
@@ -101,6 +121,8 @@ final class CommandPaletteTests: XCTestCase {
         let project = ProjectItem(id: "project-a", name: "Repo", path: "/tmp/repo")
         let older = StoredSession(
             id: "older",
+            piSessionID: "pi-older",
+            projectID: project.id,
             projectPath: project.path,
             projectName: project.name,
             title: "Older",
@@ -110,6 +132,8 @@ final class CommandPaletteTests: XCTestCase {
         )
         let newer = StoredSession(
             id: "newer",
+            piSessionID: "pi-newer",
+            projectID: project.id,
             projectPath: project.path,
             projectName: project.name,
             title: "Newer",
@@ -199,6 +223,8 @@ final class CommandPaletteTests: XCTestCase {
         let project = ProjectItem(id: "project-a", name: "Raw Repo", path: "/tmp/Raw Repo")
         let session = StoredSession(
             id: "session-a",
+            piSessionID: "pi-session-a",
+            projectID: project.id,
             projectPath: project.path,
             projectName: project.name,
             title: "Fix Auth Flow",
@@ -268,5 +294,13 @@ final class CommandPaletteTests: XCTestCase {
 
     private func resetLanguagePreference() {
         UserDefaults.standard.removeObject(forKey: "appLanguage")
+    }
+
+    private func temporaryDirectoryURL() -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CommandPaletteTests-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        temporaryURLs.append(url)
+        return url
     }
 }

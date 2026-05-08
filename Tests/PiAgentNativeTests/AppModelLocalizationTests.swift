@@ -4,6 +4,25 @@ import XCTest
 
 @MainActor
 final class AppModelLocalizationTests: XCTestCase {
+    private var temporaryURLs: [URL] = []
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        SessionStore.databaseURLForTesting = temporaryDirectory().appendingPathComponent("sessions.sqlite")
+    }
+
+    override func tearDownWithError() throws {
+        SessionStore.databaseURLForTesting = nil
+        resetLanguagePreference()
+
+        for url in temporaryURLs {
+            try? FileManager.default.removeItem(at: url)
+        }
+        temporaryURLs.removeAll()
+
+        try super.tearDownWithError()
+    }
+
     func testChatComposerLabelsResolveInEnglishAndPortuguese() {
         XCTAssertEqual(
             L10n(language: .english).string("chat.composer.placeholder"),
@@ -292,8 +311,10 @@ final class AppModelLocalizationTests: XCTestCase {
     }
 
     private func temporaryDirectory() -> URL {
-        FileManager.default.temporaryDirectory
+        let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        temporaryURLs.append(url)
+        return url
     }
 
     private func resetLanguagePreference() {

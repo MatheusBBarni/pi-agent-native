@@ -106,7 +106,7 @@ final class SettingsStoreLanguageTests: XCTestCase {
         let store = SettingsStore(customExecutablePath: "/tmp/pi-cli.js")
 
         XCTAssertFalse(store.piMonoPath.isEmpty)
-        XCTAssertFalse(store.sessionStorePath.isEmpty)
+        XCTAssertFalse(store.projectSessionStorePath.isEmpty)
         XCTAssertFalse(store.authDirectoryPath.isEmpty)
         XCTAssertEqual(store.resolvedLaunchPreview.displayName, "Custom pi")
         XCTAssertEqual(store.resolvedLaunchPreview.executableURL.path, "/usr/bin/env")

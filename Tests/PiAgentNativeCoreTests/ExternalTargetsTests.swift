@@ -125,6 +125,8 @@ final class ExternalTargetsTests: XCTestCase {
         let project = ProjectItem(name: "My Project", path: "/tmp/My Project")
         let session = StoredSession(
             id: "session-1",
+            piSessionID: "pi-session-1",
+            projectID: project.id,
             projectPath: project.path,
             projectName: project.name,
             title: "Existing session",
