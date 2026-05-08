@@ -82,7 +82,7 @@ final class PiRPCEventReducerTests: XCTestCase {
             "toolCallId": "tool-1",
             "partialResult": ["content": [["text": "running"]]]
         ])), conversation: conversation, tools: tools)
-        _ = reducer.reduce(.toolExecutionEnd(PiRPCToolExecution(payload: [
+        let effects = reducer.reduce(.toolExecutionEnd(PiRPCToolExecution(payload: [
             "toolCallId": "tool-1",
             "result": ["content": [["text": "passed"]]],
             "isError": false
@@ -97,19 +97,23 @@ final class PiRPCEventReducerTests: XCTestCase {
             text: "passed",
             isError: false
         ))))
+        XCTAssertEqual(effects, [.refreshRepositoryChanges])
     }
 
     func testEmitsQueueAndExtensionUIEffects() {
         let conversation = ConversationStore()
         let tools = ToolActivityStore()
         let reducer = PiRPCEventReducer()
+        let queueUpdate = PiRPCQueueUpdate(payload: [
+            "steering": ["Focus on failing tests", "Avoid unrelated refactors"],
+            "followUp": ["Run swift test"]
+        ])
 
-        let queueEffects = reducer.reduce(.queueUpdate(PiRPCQueueUpdate(payload: [
-            "steering": [1, 2],
-            "followUp": [1]
-        ])), conversation: conversation, tools: tools)
+        let queueEffects = reducer.reduce(.queueUpdate(queueUpdate), conversation: conversation, tools: tools)
 
-        XCTAssertEqual(queueEffects, [.setPendingMessageCount(3)])
+        XCTAssertEqual(queueEffects, [.setQueuedWork(queueUpdate)])
+        XCTAssertTrue(conversation.messages.isEmpty)
+        XCTAssertTrue(tools.tools.isEmpty)
 
         let request = PiExtensionUIRequest(payload: [
             "id": "request-1",
@@ -119,5 +123,56 @@ final class PiRPCEventReducerTests: XCTestCase {
         let extensionEffects = reducer.reduce(.extensionUIRequest(request), conversation: conversation, tools: tools)
 
         XCTAssertEqual(extensionEffects, [.extensionUIRequest(request)])
+    }
+
+    func testQueueUpdateBuildsTypedVisibleEntriesAndIgnoresInvalidValues() throws {
+        let event = PiRPCEvent.decode([
+            "type": "queue_update",
+            "steering": [
+                "  Focus   on the failing test first  ",
+                42,
+                "Do not refactor unrelated files"
+            ],
+            "followUp": [
+                ["message": "not valid"],
+                "\nRun  swift   test\n"
+            ]
+        ])
+
+        guard case .queueUpdate(let update) = event else {
+            return XCTFail("Expected queue_update to decode")
+        }
+
+        XCTAssertEqual(update.pendingMessageCount, 3)
+        XCTAssertEqual(update.entries.map(\.id), ["steering-0", "steering-1", "followUp-0"])
+        XCTAssertEqual(update.entries.map(\.title), ["Steering", "Steering", "Follow-up"])
+        XCTAssertEqual(update.entries.map(\.position), [0, 1, 0])
+        XCTAssertEqual(update.entries[0].text, "  Focus   on the failing test first  ")
+        XCTAssertEqual(update.entries[0].summary, "Focus on the failing test first")
+        XCTAssertEqual(update.entries[2].summary, "Run swift test")
+    }
+
+    func testQueueUpdateTreatsMissingOrNonArrayQueuesAsEmpty() {
+        let update = PiRPCQueueUpdate(payload: [
+            "steering": "not an array",
+            "followUp": ["   "]
+        ])
+
+        XCTAssertEqual(update.pendingMessageCount, 1)
+        XCTAssertEqual(update.entries, [
+            QueuedWorkEntry(kind: .followUp, text: "   ", position: 0)
+        ])
+        XCTAssertEqual(update.entries[0].summary, "Empty queued message")
+    }
+
+    func testQueueEntryCanProvideTruncatedPresentationSummary() {
+        let entry = QueuedWorkEntry(
+            kind: .steering,
+            text: "This queued message is intentionally long",
+            position: 0
+        )
+
+        XCTAssertEqual(entry.summary(maxLength: 12), "This queu...")
+        XCTAssertEqual(entry.summary(maxLength: 3), entry.summary)
     }
 }

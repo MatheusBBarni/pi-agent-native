@@ -277,6 +277,10 @@ struct ComposerView: View {
                 PendingSkillSelectionView()
             }
 
+            if !model.pendingContextAttachments.isEmpty {
+                PendingContextAttachmentView()
+            }
+
             promptEditor
                 .zIndex(1)
 
@@ -563,6 +567,94 @@ struct SelectedSkillChip: View {
         .frame(height: 24)
         .background(Theme.elevatedBackground)
         .clipShape(Capsule())
+    }
+}
+
+struct PendingContextAttachmentView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(model.pendingContextAttachments) { attachment in
+                        ContextAttachmentChip(attachment: attachment) {
+                            model.removePendingContextAttachment(attachment)
+                        }
+                    }
+                }
+            }
+
+            if model.pendingContextAttachments.count > 1 {
+                Button {
+                    model.clearPendingContextAttachments()
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.tertiaryText)
+                .help("Clear context attachments")
+            }
+        }
+        .frame(height: 30)
+        .padding(.horizontal, 4)
+    }
+}
+
+struct ContextAttachmentChip: View {
+    let attachment: ContextAttachment
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: attachment.kind.systemImage)
+                .font(.system(size: 11, weight: .semibold))
+
+            Text(label)
+                .uiFont(size: 12, weight: .medium)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            if !attachment.status.isValid {
+                Text(attachment.status.displayText)
+                    .uiFont(size: 11, weight: .medium)
+                    .foregroundStyle(Theme.red)
+                    .lineLimit(1)
+            }
+
+            Button(action: onRemove) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .frame(width: 16, height: 16)
+            }
+            .buttonStyle(.plain)
+            .help("Remove context attachment")
+        }
+        .foregroundStyle(attachment.status.isValid ? Theme.secondaryText : Theme.red)
+        .padding(.leading, 8)
+        .padding(.trailing, 5)
+        .frame(height: 24)
+        .background(Theme.elevatedBackground)
+        .clipShape(Capsule())
+        .help(helpText)
+        .accessibilityLabel(Text(accessibilityLabel))
+    }
+
+    private var label: String {
+        let path = attachment.relativePath
+        guard !path.isEmpty, path != attachment.displayName else {
+            return attachment.displayName
+        }
+        return path
+    }
+
+    private var helpText: String {
+        attachment.status.isValid ? attachment.relativePath : "\(attachment.relativePath) - \(attachment.status.displayText)"
+    }
+
+    private var accessibilityLabel: String {
+        "\(attachment.kind.label) context attachment \(attachment.relativePath), \(attachment.status.displayText)"
     }
 }
 

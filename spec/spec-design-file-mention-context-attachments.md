@@ -108,6 +108,9 @@ Out of scope:
 - **REQ-041**: The first implementation shall not send Context Attachments as image attachments.
 - **REQ-042**: The existing plain-text File Mention path shall continue working when no Context Attachments exist.
 - **REQ-043**: The existing plain-text File Mention path shall continue appearing in the RPC message when attachment state is unavailable or not created.
+- **REQ-044**: Native-rendered user messages shall not show native Context Attachment prompt decoration, including messages reconstructed from Pi RPC history.
+- **REQ-045**: Prompt visibility stripping shall remove only native-generated Context Attachment decoration at the beginning of an RPC prompt, after any native Skill Prompt Decoration blocks, and shall preserve user-authored `<context-attachments>` text elsewhere.
+- **REQ-046**: Prompt decoration shall keep each attachment entry on one logical line by escaping path control characters that would otherwise create ambiguous or additional decoration lines.
 - **CON-001**: Do not introduce a new Pi RPC file payload unless upstream Pi RPC documents one.
 - **CON-002**: Do not make Context Attachments global across projects.
 - **CON-003**: Do not add live filesystem watchers in this issue.
@@ -116,6 +119,7 @@ Out of scope:
 - **GUD-002**: Reuse Mention Index Entry, Mention Inserter, and project-root containment behavior where possible.
 - **GUD-003**: Prefer the same visual density as Selected Skill chips for Attachment Chips.
 - **PAT-001**: Separate attachment state, attachment resolution, prompt decoration, and composer rendering so each can be unit-tested independently.
+- **PAT-002**: Keep prompt composition and visible-prompt stripping in an explicit native prompt decoration boundary, either by extending the existing `SkillPromptDecorator` path deliberately or by introducing a small shared decorator.
 
 ## 4. Interfaces & Data Contracts
 
@@ -203,10 +207,12 @@ Rules:
 - File entries use `file: {workspace-relative-path}`.
 - Folder entries use `folder: {workspace-relative-path}/`.
 - Folder paths must have exactly one trailing slash in the decoration.
+- Path text must be emitted as a single line. At minimum, escape `\`, newline, carriage return, and tab characters in workspace-relative paths before inserting them into the decoration block.
 - Attachment entries preserve pending attachment order unless the UI later adds explicit reordering.
 - The block is omitted when there are no valid Context Attachments.
 - The decorated RPC prompt must remain a string passed to `PiRPCCommand.prompt`.
 - The visible user message appended to the conversation must remain the trimmed user prompt without the context attachment block.
+- User messages rebuilt from RPC history through `get_messages` must also hide native Context Attachment decoration from the visible conversation.
 
 ### Composition With Skills
 
@@ -244,13 +250,15 @@ The implementation may achieve this by applying the Context Attachment decorator
 - **AC-014**: Given a prompt with Context Attachments is sent, Then the conversation user message shows only the user's visible prompt text.
 - **AC-015**: Given prompt submission succeeds, Then composer text, Context Attachments, Mention Picker state, and pending Skills are cleared.
 - **AC-016**: Given Refresh State is invoked with pending Context Attachments, Then attachments for the current Selected Project are revalidated and invalid attachments remain visible.
+- **AC-017**: Given Pi RPC history returns a user message that begins with native Skill Prompt Decoration and native Context Attachment decoration, When Pi Agent Native rebuilds the conversation, Then the visible user message hides both native decoration blocks and preserves only the user's prompt text.
+- **AC-018**: Given a workspace-relative attachment path contains newline, carriage return, tab, or backslash characters, When Context Attachment prompt decoration is generated, Then the decorated RPC prompt contains exactly one attachment entry for that attachment and does not create extra decoration lines.
 
 ## 6. Test Automation Strategy
 
 - **Test Levels**: Unit tests for models, attachment resolution, deduplication, project switching invalidation, prompt decoration, and RPC payload construction; view-level smoke tests if the project has or adds a UI automation layer.
 - **Frameworks**: Swift XCTest in the existing test targets.
 - **Test Data Management**: Use temporary Selected Project directories with files, folders, deleted paths, kind changes, symlinks, and sibling project paths such as `/tmp/project-other`.
-- **Coverage Requirements**: Tests must cover valid files, valid folders, duplicate selection, remove without text mutation, deleted path, wrong kind, symlink escape, project switch, empty attachment decoration, skill-plus-attachment decoration order, and plain-text mention compatibility.
+- **Coverage Requirements**: Tests must cover valid files, valid folders, duplicate selection, remove without text mutation, deleted path, wrong kind, symlink escape, project switch, empty attachment decoration, skill-plus-attachment decoration order, visible conversation stripping for replayed decorated user prompts, attachment path escaping, and plain-text mention compatibility.
 - **Performance Testing**: No large-tree performance testing is required because attachment resolution checks only pending attachments. Add a lightweight test with multiple pending attachments to confirm synchronous resolution is bounded by attachment count.
 
 Suggested focused test files:
@@ -353,7 +361,38 @@ If project A has `Sources/App.swift` attached and the user switches to project B
 - Existing Skill Prompt Decoration tests continue to pass.
 - Issue 25 acceptance criteria are all represented by tests or explicit manual verification notes.
 
-## 11. Related Specifications / Further Reading
+## 11. Implementation Handoff
+
+### Likely Files and Modules
+
+| File or Module | Expected Work |
+|---|---|
+| `Sources/PiAgentNative/MentionModels.swift` | Add Context Attachment value models, status, and kind definitions near existing mention models or in a dedicated attachment model file. |
+| `Sources/PiAgentNative/MentionInserter.swift` | Reuse project-root containment behavior; do not weaken existing File Mention insertion validation. |
+| `Sources/PiAgentNative/AppModel.swift` | Own pending attachment state, create or refresh attachments during `insertMention(_:)`, revalidate in `sendPrompt()`, clear on successful prompt submission, `newSession()`, and Selected Project changes, and refresh status from `refreshState()`. |
+| `Sources/PiAgentNative/ChatSurfaceView.swift` | Render Attachment Chips below pending Selected Skill Chips and above `PromptTextView`; show invalid attachment status inline. |
+| `Sources/PiAgentNative/SkillSelection.swift` or a new prompt decorator file | Compose Skill Prompt Decoration and Context Attachment prompt decoration in the required order, and strip native decoration from visible user messages rebuilt from RPC history. |
+| `Sources/PiAgentNative/RPC/PiRPCCommand.swift` | Keep the prompt command as a string `message`; do not add a file payload in this issue. |
+| `Tests/PiAgentNativeCoreTests/ContextAttachmentResolverTests.swift` | Cover filesystem resolution, kind checks, symlink escape, project mismatch, and sibling-prefix containment. |
+| `Tests/PiAgentNativeCoreTests/ContextAttachmentPromptDecoratorTests.swift` | Cover decoration format, empty attachments, folder trailing slash normalization, path escaping, skill composition order, and visible-prompt stripping. |
+| `Tests/PiAgentNativeTests/ContextAttachmentSubmissionTests.swift` | Cover AppModel submission blocking, preservation on validation failure, clearing on success, project switch/new chat clearing, and plain-text mention compatibility. |
+
+### Planner Confidence Pass
+
+The following loopholes were checked and closed in this spec:
+
+- **File upload ambiguity**: Closed by defining Context Attachments as native references with prompt decoration only.
+- **Project escape through path prefixes**: Closed by requiring resolved component comparison, not raw string prefix checks.
+- **Symlink escape**: Closed by requiring symlink resolution before submission.
+- **Editable text mismatch**: Closed by making Attachment Chips the pending attachment source of truth after selection while preserving plain-text File Mentions.
+- **Skill composition regression**: Closed by requiring Skill Prompt Decoration before Context Attachment decoration.
+- **Visible chat leakage**: Closed by requiring native Context Attachment decoration stripping for both immediate user messages and RPC history replay.
+- **Prompt block ambiguity from unusual path characters**: Closed by requiring one-line escaped path output in decoration entries.
+- **Transport overreach**: Closed by forbidding a new Pi RPC file payload unless upstream Pi RPC documents one.
+
+No ADR is required unless implementation discovers a new hard-to-reverse transport choice, a persistent attachment model, or a cross-project attachment scope.
+
+## 12. Related Specifications / Further Reading
 
 - [File Mention Picker Design](./spec-design-file-mention-picker.md)
 - [Skill Selection Picker Design](./spec-design-skill-selection-picker.md)

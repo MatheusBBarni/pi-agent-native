@@ -27,6 +27,12 @@ struct PiAgentNativeApp: App {
                 .keybindingShortcut(.openProject)
                 .disabled(!model.canPerformAppAction(.openProject))
 
+                Button(DefaultKeymap.title(for: .openCommandPalette) ?? "Open Command Palette") {
+                    model.performAppAction(.openCommandPalette)
+                }
+                .keybindingShortcut(.openCommandPalette)
+                .disabled(!model.canPerformAppAction(.openCommandPalette))
+
                 Divider()
 
                 Button(DefaultKeymap.title(for: .focusComposer) ?? "Focus composer") {

@@ -1,8 +1,8 @@
 ---
 title: Native Diff Review Surface Design
-version: 1.0
+version: 1.1
 date_created: 2026-05-07
-last_updated: 2026-05-07
+last_updated: 2026-05-08
 owner: Pi Agent Native
 tags: [design, app, diff, git, review, macos]
 ---
@@ -27,6 +27,7 @@ In scope:
 - Refreshing review data after completed agent tool activity.
 - Refreshing review data when the user invokes Refresh State.
 - Opening the selected file or Selected Project externally for deeper review.
+- Documenting exact Git status and diff parsing rules, including NUL-delimited rename records.
 - Tests for Git output mapping, diff hunk parsing, empty repository state, dirty worktree state, and refresh behavior.
 
 Out of scope:
@@ -101,11 +102,15 @@ Out of scope:
 - **REQ-038**: The Change Review Surface shall not parse process-log text or tool stdout to determine repository changes.
 - **REQ-039**: The Change Review Surface shall not claim exact Pi-turn attribution for changes in the first slice.
 - **REQ-040**: The existing Inspector branch summary may continue to show the compact dirty count, but it shall be backed by or kept consistent with the Repository Change Snapshot refresh path.
+- **REQ-041**: Status parsing and diff parsing shall be implemented as pure, fixture-testable logic separate from `Process` execution and SwiftUI rendering.
+- **REQ-042**: The tool-completion refresh trigger shall be wired through reducer/AppModel effects and debounced at the app-model refresh boundary, not implemented by polling Git or watching the filesystem.
+- **REQ-043**: The review UI shall retain a valid selection when possible after refresh, select the first changed file when the previous selection disappeared, and show an empty detail state when there are no changed files.
 - **CON-001**: Git is the only repository backend in the first implementation.
 - **CON-002**: The first implementation is inspect-only.
 - **CON-003**: Live filesystem watching is out of scope.
 - **CON-004**: Exact attribution to a Pi session or tool call is out of scope.
 - **CON-005**: The UI must remain usable when no repository changes exist.
+- **CON-006**: The first implementation shall not introduce a second external-target catalog for files; file/project opening must extend or reuse the existing external-opening path.
 - **GUD-001**: Prefer extending `GitService` rather than adding ad hoc Git commands in SwiftUI views.
 - **GUD-002**: Prefer a split layout: changed-file list on one side and diff hunks on the other.
 - **GUD-003**: Keep the review surface visually denser than a marketing page; this is an inspection workflow.
@@ -118,8 +123,9 @@ Out of scope:
 The first implementation should use these Git commands or equivalents:
 
 ```text
+git rev-parse --is-inside-work-tree
 git status --porcelain=v1 -z
-git diff --find-renames --no-ext-diff --no-color --unified=3 HEAD -- <path>
+git diff --find-renames --no-ext-diff --no-color --unified=3 HEAD -- <tracked-path>
 ```
 
 Rules:
@@ -129,7 +135,21 @@ Rules:
 - Use `--porcelain=v1 -z` or an equivalently parseable status format.
 - Use `HEAD` as the first-version baseline for tracked changes so staged and unstaged tracked changes are visible together.
 - Treat `??` entries as untracked and display them as added-style Changed Files.
+- Do not call `git diff HEAD -- <path>` for untracked files and expect content; Git returns no diff for untracked paths. Either synthesize a bounded added-file diff for readable text files or show the required untracked-file unavailable message.
 - If `HEAD` is unavailable, fall back to status-only Changed File listing and show a clear diff unavailable message.
+
+### Porcelain `-z` Status Parsing Rules
+
+`git status --porcelain=v1 -z` is the preferred status format because it avoids quoting and newline ambiguity. The parser must consume bytes or scalars split by NUL, not newline.
+
+Record rules:
+
+- Ordinary tracked records have the form `XY path\0`.
+- Untracked records have the form `?? path\0`.
+- Ignored records, if ever included, have the form `!! path\0` and are out of scope for the first snapshot.
+- Rename and copy records have the form `XY newPath\0oldPath\0` when `-z` is enabled. This order is different from the human-readable `old -> new` display.
+- `X` is the index status and `Y` is the worktree status. A space means no change for that side.
+- Paths are workspace-relative POSIX paths and must not be resolved by string concatenation in UI code.
 
 ### Conceptual Models
 
@@ -233,6 +253,8 @@ Exact names may differ, but the implementation must preserve these concepts.
 
 If both index and worktree statuses exist, choose the most user-visible state in this order for the first badge: renamed, deleted, added, modified, untracked. Preserve raw index and worktree status fields for detail text and tests.
 
+For rename records emitted with `-z`, store `path = newPath` and `originalPath = oldPath`.
+
 ### Diff Parsing
 
 The diff parser shall:
@@ -257,6 +279,31 @@ Recommended first slice:
 
 This placement can change if a broader shell navigation surface exists, but the first slice must not hide review behind process logs.
 
+### Current Code Handoff
+
+Likely implementation files and responsibilities:
+
+| File/module | Expected change |
+|---|---|
+| `Sources/PiAgentNative/Workspace/GitService.swift` | Extend from branch summary to repository snapshot loading. Keep process execution here or in adjacent workspace service types. |
+| `Sources/PiAgentNative/Models.swift` or new workspace model file | Add Repository Change Snapshot, Changed File, Diff Hunk, Diff Line, and related status enums. |
+| `Sources/PiAgentNative/AppModel.swift` | Store snapshot state, trigger initial/manual/project-change refreshes, debounce tool-completion refreshes, and ignore stale loads by project path. |
+| `Sources/PiAgentNative/RPC/PiRPCEventReducer.swift` | Emit a refresh effect on `toolExecutionEnd` in addition to the existing `agentEnd` refresh. |
+| `Sources/PiAgentNative/InspectorView.swift` | Add a Changes card and review entry point. |
+| New SwiftUI review view file | Render the changed-file list and native hunk viewer. Keep staging/apply/discard controls absent. |
+| `Sources/PiAgentNative/ExternalTargets.swift` | Reuse or minimally extend external launch planning so the review surface can open a selected file or containing project without duplicating target logic. |
+| `Tests/PiAgentNativeCoreTests/` | Add parser and service mapping tests with fixture strings/bytes. |
+| `Tests/PiAgentNativeTests/` | Add AppModel/reducer refresh wiring tests where practical. |
+
+Implementation order:
+
+1. Add pure status and diff parser tests first, including `-z` rename records.
+2. Add snapshot models and GitService snapshot loading.
+3. Add AppModel snapshot state and refresh/debounce wiring.
+4. Add Inspector entry point and review surface rendering.
+5. Add external-open action paths for selected file/project.
+6. Run `swift test` and `git diff --check`, then manually smoke-test a dirty repository.
+
 ## 5. Acceptance Criteria
 
 - **AC-001**: Given no Selected Project exists, When the Change Review Surface is opened or rendered, Then it shows an unavailable state asking the user to open a project.
@@ -277,13 +324,16 @@ This placement can change if a broader shell navigation surface exists, but the 
 - **AC-016**: Given the user opens the Selected Project externally from the review surface, Then the existing Open Externally behavior is used and app conversation state is unchanged.
 - **AC-017**: Given the user inspects changes, Then no staging, unstaging, discard, apply, or commit controls are present in the first slice.
 - **AC-018**: Given Git command execution fails, Then the surface shows a lightweight error and process log detail without a blocking modal.
+- **AC-019**: Given `git status --porcelain=v1 -z` reports a rename as `R  new.txt\0old.txt\0`, When status is parsed, Then the Changed File path is `new.txt` and original path is `old.txt`.
+- **AC-020**: Given a tool execution ends successfully or with failure, When the reducer handles `toolExecutionEnd`, Then the app schedules exactly one debounced Repository Change Snapshot refresh for the active Selected Project.
+- **AC-021**: Given a refresh completes after the user switched projects, When the completion attempts to apply, Then the snapshot is discarded because the project path no longer matches.
 
 ## 6. Test Automation Strategy
 
 - **Test Levels**: Unit tests for status parsing, diff parsing, service output mapping, snapshot state transitions, and refresh invalidation; AppModel tests for refresh trigger wiring where practical; manual UI smoke tests for hunk view layout.
 - **Frameworks**: Swift XCTest in existing SwiftPM test targets.
 - **Test Data Management**: Prefer parser tests with fixture strings for porcelain status and unified diff output. Add integration-style temporary Git repository tests only where process execution behavior matters and Git is available.
-- **Coverage Requirements**: Tests must cover clean status output, added, modified, deleted, renamed, untracked, binary diff output, hunk range parsing, no-newline metadata, failed Git command mapping, Selected Project change during async refresh, manual refresh, and tool-completion refresh scheduling.
+- **Coverage Requirements**: Tests must cover clean status output, added, modified, deleted, NUL-delimited renamed records, untracked records, binary diff output, hunk range parsing, no-newline metadata, failed Git command mapping, Selected Project change during async refresh, manual refresh, and tool-completion refresh scheduling.
 - **Performance Testing**: Add a bounded test or assertion for untracked file preview limits if the implementation synthesizes untracked-file diffs. No large-repo load test is required in the first slice.
 
 Suggested focused test files:
@@ -292,6 +342,24 @@ Suggested focused test files:
 - `Tests/PiAgentNativeCoreTests/GitDiffParserTests.swift`
 - `Tests/PiAgentNativeCoreTests/RepositoryChangeSnapshotTests.swift`
 - `Tests/PiAgentNativeTests/ChangeReviewRefreshTests.swift`
+
+Minimum parser fixtures:
+
+```text
+M  Sources/App.swift\0
+ D Sources/Removed.swift\0
+?? Notes.txt\0
+R  Sources/New.swift\0Sources/Old.swift\0
+```
+
+Expected mapping:
+
+```text
+modified path=Sources/App.swift
+deleted path=Sources/Removed.swift
+untracked path=Notes.txt
+renamed path=Sources/New.swift originalPath=Sources/Old.swift
+```
 
 ## 7. Rationale & Context
 
@@ -302,6 +370,18 @@ The first slice is inspect-only because staging, discarding, applying patches, a
 The first slice also avoids exact attribution to a Pi session or tool call. The issue asks for changes produced during Pi sessions, but the reliable first behavior is to show the current Selected Project repository changes after agent tools and refreshes. Attribution can be layered later once session/tool-to-file provenance exists.
 
 No ADR is required because the design extends the existing GitService and Inspector/tool-activity architecture without a hard-to-reverse architectural commitment.
+
+### Confidence Pass and Loophole Closure
+
+The strategy is implementation-ready after closing these loopholes:
+
+| Loophole | Fix in this spec |
+|---|---|
+| `git status --porcelain=v1 -z` rename records can be parsed backwards if treated like the human-readable `old -> new` form. | Added explicit `newPath\0oldPath\0` parsing rule and acceptance criterion. |
+| Untracked files do not produce content through `git diff HEAD -- <path>`. | Required bounded synthesized diffs or an explicit unavailable message for untracked files. |
+| Tool-completion refresh could be implemented as filesystem polling. | Required reducer/AppModel refresh wiring and debounce, with live watching still out of scope. |
+| UI selection could become stale after refresh. | Required selection retention/fallback behavior. |
+| External file opening could duplicate external-target infrastructure. | Required reuse or minimal extension of the existing external-opening path. |
 
 ## 8. Dependencies & External Integrations
 

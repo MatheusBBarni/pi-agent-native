@@ -189,17 +189,28 @@ struct PiRPCToolExecution {
     }
 }
 
-struct PiRPCQueueUpdate {
-    var steeringCount: Int
-    var followUpCount: Int
+struct PiRPCQueueUpdate: Equatable {
+    var steering: [QueuedWorkEntry]
+    var followUp: [QueuedWorkEntry]
 
     init(payload: [String: Any]) {
-        steeringCount = (payload["steering"] as? [Any])?.count ?? 0
-        followUpCount = (payload["followUp"] as? [Any])?.count ?? 0
+        steering = Self.entries(from: payload["steering"], kind: .steering)
+        followUp = Self.entries(from: payload["followUp"], kind: .followUp)
     }
 
     var pendingMessageCount: Int {
-        steeringCount + followUpCount
+        entries.count
+    }
+
+    var entries: [QueuedWorkEntry] {
+        steering + followUp
+    }
+
+    private static func entries(from value: Any?, kind: QueuedWorkKind) -> [QueuedWorkEntry] {
+        guard let values = value as? [Any] else { return [] }
+        return values.compactMap { $0 as? String }.enumerated().map { offset, text in
+            QueuedWorkEntry(kind: kind, text: text, position: offset)
+        }
     }
 }
 
