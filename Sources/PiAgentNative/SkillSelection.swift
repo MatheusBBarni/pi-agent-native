@@ -264,6 +264,10 @@ enum SkillPromptDecorator {
             strippedAnyBlock = true
         }
 
+        let withoutContextAttachments = ContextAttachmentPromptDecorator.visibleUserPrompt(from: remaining)
+        if withoutContextAttachments != remaining {
+            return withoutContextAttachments
+        }
         return strippedAnyBlock ? remaining : rpcPrompt
     }
 

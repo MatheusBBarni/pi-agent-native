@@ -49,6 +49,7 @@ public final class AppModel: ObservableObject {
     @Published var gitDetails = GitBranchDetails()
     @Published var mentionPickerState: MentionPickerState?
     @Published var pendingMentionTextReplacement: MentionTextReplacement?
+    @Published var pendingContextAttachments: [ContextAttachment] = []
 
     let conversationStore: ConversationStore
     let toolActivityStore: ToolActivityStore
@@ -72,6 +73,7 @@ public final class AppModel: ObservableObject {
     private var mentionIndexCache: [String: [MentionIndexEntry]] = [:]
     private var mentionIndexTask: Task<Void, Never>?
     private var mentionIndexLoadingProjectPath: String?
+    private var pendingContextAttachmentInsertion: (replacementID: UUID, attachment: ContextAttachment)?
     private var handledSubscriptionLoginAttemptIDs: Set<UUID> = []
 
     var workspacePath: String {
@@ -337,7 +339,7 @@ public final class AppModel: ObservableObject {
 
     func sendPrompt() {
         let prompt = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty else { return }
+        guard !prompt.isEmpty || !pendingContextAttachments.isEmpty else { return }
         guard !isStreaming else { return }
         guard selectedProject != nil else {
             statusText = "Open a project"
@@ -347,12 +349,14 @@ public final class AppModel: ObservableObject {
 
         let submission = SkillSelectionLogic.parseSubmission(prompt)
 
-        if !isConnected {
-            start()
-        }
-
         switch submission {
         case .normalPrompt:
+            guard validatePendingContextAttachmentsForSubmission() else {
+                return
+            }
+            if !isConnected {
+                start()
+            }
             if let message = authAccess.sendPromptUnavailableMessage {
                 statusText = "Model access unavailable"
                 appendLog(title: "prompt blocked", detail: message)
@@ -363,13 +367,20 @@ public final class AppModel: ObservableObject {
             appendLog(title: "skill selection failed", detail: message)
             return
         case .selection(let skillIDs):
+            if !isConnected {
+                start()
+            }
             submitSkillSelection(skillIDs)
             return
         }
 
         let rpcPrompt: String
         do {
-            rpcPrompt = try SkillPromptDecorator.decoratedPrompt(userPrompt: prompt, skills: pendingSelectedSkills)
+            let attachmentPrompt = ContextAttachmentPromptDecorator.decoratedPrompt(
+                userPrompt: prompt,
+                attachments: pendingContextAttachments
+            )
+            rpcPrompt = try SkillPromptDecorator.decoratedPrompt(userPrompt: attachmentPrompt, skills: pendingSelectedSkills)
         } catch {
             statusText = "Skill expansion failed"
             appendLog(title: "skill expansion failed", detail: error.localizedDescription)
@@ -384,6 +395,7 @@ public final class AppModel: ObservableObject {
         }
         composerText = ""
         pendingSelectedSkills.removeAll()
+        pendingContextAttachments.removeAll()
 
         if selectedSessionID == nil {
             pendingPromptAfterNewSession = rpcPrompt
@@ -410,6 +422,7 @@ public final class AppModel: ObservableObject {
         isSwitchingSession = false
         pendingPromptAfterNewSession = nil
         clearSkillSelectionState(clearAvailableSkills: false)
+        clearPendingContextAttachments()
         persistState()
     }
 
@@ -527,7 +540,7 @@ public final class AppModel: ObservableObject {
     var canSendPrompt: Bool {
         let prompt = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !isStreaming,
-              !prompt.isEmpty,
+              !prompt.isEmpty || !pendingContextAttachments.isEmpty,
               selectedProject != nil,
               !isCreatingNewSession
         else { return false }
@@ -590,6 +603,7 @@ public final class AppModel: ObservableObject {
             sendCommand(.getCommands())
         }
         refreshGitDetails()
+        refreshPendingContextAttachmentResolution()
     }
 
     func canNavigateToPreviousSession() -> Bool {
@@ -713,6 +727,11 @@ public final class AppModel: ObservableObject {
     func mentionTextReplacementWasApplied(_ id: UUID) {
         guard pendingMentionTextReplacement?.id == id else { return }
         pendingMentionTextReplacement = nil
+        if pendingContextAttachmentInsertion?.replacementID == id,
+           let attachment = pendingContextAttachmentInsertion?.attachment {
+            upsertPendingContextAttachment(attachment)
+            pendingContextAttachmentInsertion = nil
+        }
         refreshMentionPicker()
     }
 
@@ -910,6 +929,15 @@ public final class AppModel: ObservableObject {
         pendingSelectedSkills.removeAll()
     }
 
+    func removePendingContextAttachment(_ attachment: ContextAttachment) {
+        pendingContextAttachments.removeAll { $0.id == attachment.id }
+    }
+
+    func clearPendingContextAttachments() {
+        pendingContextAttachments.removeAll()
+        pendingContextAttachmentInsertion = nil
+    }
+
     func handleComposerControlKey(_ key: ComposerControlKey) -> Bool {
         guard let pickerState = skillPickerState else { return false }
 
@@ -1071,6 +1099,22 @@ public final class AppModel: ObservableObject {
         else { return }
 
         pendingMentionTextReplacement = replacement
+        let initialStatus = ContextAttachmentResolver.resolve(
+            ContextAttachment.make(
+                from: result.entry,
+                selectedProject: selectedProject,
+                status: .valid(resolvedURL: result.entry.resolvedURL)
+            ),
+            selectedProject: selectedProject
+        )
+        pendingContextAttachmentInsertion = (
+            replacementID: replacement.id,
+            attachment: ContextAttachment.make(
+                from: result.entry,
+                selectedProject: selectedProject,
+                status: initialStatus
+            )
+        )
         closeMentionPicker()
     }
 
@@ -1094,7 +1138,43 @@ public final class AppModel: ObservableObject {
 
     private func resetMentionContext(invalidateProjectAt projectPath: String?) {
         pendingMentionTextReplacement = nil
+        clearPendingContextAttachments()
         invalidateMentionIndex(for: projectPath)
+    }
+
+    private func upsertPendingContextAttachment(_ attachment: ContextAttachment) {
+        var refreshedAttachment = attachment
+        refreshedAttachment.status = ContextAttachmentResolver.resolve(
+            attachment,
+            selectedProject: selectedProject
+        )
+
+        if let index = pendingContextAttachments.firstIndex(where: { $0.id == refreshedAttachment.id }) {
+            pendingContextAttachments[index] = refreshedAttachment
+        } else {
+            pendingContextAttachments.append(refreshedAttachment)
+        }
+    }
+
+    private func refreshPendingContextAttachmentResolution() {
+        guard !pendingContextAttachments.isEmpty else { return }
+        pendingContextAttachments = ContextAttachmentResolver.refreshed(
+            pendingContextAttachments,
+            selectedProject: selectedProject
+        )
+    }
+
+    private func validatePendingContextAttachmentsForSubmission() -> Bool {
+        refreshPendingContextAttachmentResolution()
+        let invalidAttachments = pendingContextAttachments.filter { !$0.status.isValid }
+        guard !invalidAttachments.isEmpty else { return true }
+
+        statusText = invalidAttachments.count == 1 ? "Attachment unavailable" : "Attachments unavailable"
+        appendLog(
+            title: "prompt blocked",
+            detail: invalidAttachments.map { "\($0.relativePath): \($0.status.displayText)" }.joined(separator: ", ")
+        )
+        return false
     }
 
     private func isRunningSession(_ session: StoredSession) -> Bool {
@@ -1118,6 +1198,7 @@ public final class AppModel: ObservableObject {
         let oldWorkspace = workspacePath
         persistCurrentSessionSnapshot()
         clearSkillSelectionState(clearAvailableSkills: oldWorkspace != session.projectPath)
+        clearPendingContextAttachments()
         selectedSessionID = session.id
         sessionTitle = session.title
         statusText = session.status
