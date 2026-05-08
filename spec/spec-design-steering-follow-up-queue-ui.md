@@ -73,14 +73,21 @@ Out of scope:
 - **REQ-016**: Queue UI state shall be cleared when starting a new chat, switching sessions, stopping/restarting the RPC process, or receiving an authoritative empty `queue_update`.
 - **REQ-017**: The app shall not use the process log as the primary queue inspection surface.
 - **REQ-018**: The implementation shall not conflate Queued Work with Tool Activity entries, even though both can appear in the Inspector.
+- **REQ-019**: The app shall track whether full queue detail has been received for the active RPC session, so count-only `get_state` data does not accidentally overwrite visible queue entries.
+- **REQ-020**: If `get_state.pendingMessageCount` is `0`, the visible queue display state shall clear for the active session.
+- **REQ-021**: Queue detail shall be scoped to the active RPC process/session generation; stale queue entries from a previous process, new chat, or session switch must never be displayed after the active context changes.
+- **REQ-022**: Non-string elements inside `steering` or `followUp` arrays shall not create visible queue entries.
 - **CON-001**: Pi RPC `queue_update` currently carries `steering` and `followUp` as arrays of strings; the first native model shall preserve those strings and avoid assuming hidden ids or timestamps.
 - **CON-002**: The first slice shall be read-only queue visibility.
 - **CON-003**: Queue rendering must not block prompt submission, streaming updates, extension UI, or tool activity rendering.
 - **CON-004**: The UI must remain useful if a session only reports a numeric pending count.
+- **CON-005**: Do not change prompt submission, steering controls, follow-up controls, or `streamingBehavior` handling as part of this issue except where state clearing is required for queue display correctness.
+- **CON-006**: Invalid queue array elements shall be ignored for visible entries instead of stringified into user-facing text.
 - **PAT-001**: Add a small value model, such as `QueuedWorkEntry`, with `kind`, `text`, and computed `summary` fields.
 - **PAT-002**: Add formatting logic for queue entry summaries in a testable non-view type.
 - **PAT-003**: Route queue updates through `PiRPCEventReducer` effects instead of mutating AppModel directly from decode code.
 - **PAT-004**: Keep queue state in AppModel or a small observable store; do not place queue parsing in `InspectorView`.
+- **PAT-005**: Prefer one state-setting reducer effect that carries both visible queue entries and the derived pending count, instead of emitting independent effects that can get out of sync.
 
 ## 4. Interfaces & Data Contracts
 
@@ -104,6 +111,9 @@ Required native interpretation:
 | `followUp` | Ordered list of Follow-Up Queue Entry text |
 | missing or non-array `steering` | Treat as empty for visible entries; do not crash |
 | missing or non-array `followUp` | Treat as empty for visible entries; do not crash |
+| non-string elements in either array | Ignore for visible entries; do not crash and do not stringify |
+
+Pi RPC also supports queuing through `prompt` with `streamingBehavior: "steer"` or `streamingBehavior: "followUp"`, plus explicit `steer` and `follow_up` commands. This issue only renders the resulting queue state; it does not add or redesign submission controls.
 
 ### Native Queue Model Contract
 
@@ -133,6 +143,8 @@ Required behavior:
 - `title` must be "Steering" for steering entries and "Follow-up" for follow-up entries.
 - `summary` must trim leading/trailing whitespace, collapse internal whitespace, and use a clear fallback such as "Empty queued message" if the source text is empty after trimming.
 - Very long summaries must be truncated for UI presentation by shared formatting logic or SwiftUI line limits.
+- Invalid non-string queue array elements must not create visible queue entries.
+- Non-array `steering` or `followUp` fields must produce no visible entries for that category.
 
 ### Queue State Contract
 
@@ -152,11 +164,13 @@ State rules:
 | Input | Required state |
 |---|---|
 | App has not received queue detail and no count is known | `loading` or `empty`, depending existing app connection conventions |
-| `get_state.pendingMessageCount == 0` and no queue detail exists | `empty` |
+| `get_state.pendingMessageCount == 0` | `empty`; clear any visible queue detail for the active session |
 | `get_state.pendingMessageCount > 0` and no queue detail exists | `countOnly(count)` |
 | `queue_update` with entries | `entries(entries)` |
 | `queue_update` with both arrays empty | `empty` |
 | New chat, session switch, RPC stop/restart | `empty` unless a subsequent count or queue event says otherwise |
+| `get_state.pendingMessageCount > 0` after queue detail exists and the count matches visible entry count | Preserve the existing visible queue detail |
+| `get_state.pendingMessageCount > 0` after queue detail exists and the count differs from visible entry count | Replace the detail display with `countOnly(count)` rather than showing stale or fake entries |
 
 ### Current Code Mapping
 
@@ -169,6 +183,8 @@ State rules:
 | `AppModel` | No visible queue entry state | Owns or exposes queue display state for UI rendering |
 | `InspectorView` | Shows "`N` queued" as a metric when count > 0 | Renders a Queue Surface with category labels, summaries, and empty/count-only states |
 | `RPCTests` | Verifies queue count effect only | Verifies typed queue entries, formatting, and reducer output |
+
+Implementation agents should also inspect existing reset paths in `AppModel.start()`, `AppModel.stop()`, `AppModel.newSession()`, `switch_session` response handling, and RPC process exit handling, because those paths are where stale queue detail can leak into a new active context.
 
 ## 5. Acceptance Criteria
 
@@ -185,6 +201,10 @@ State rules:
 - **AC-011**: Given queued work is visible, When the user starts a new chat or switches sessions, Then stale queue entries are not shown for the new context.
 - **AC-012**: Given queued work is visible, Then the process log is not required to identify whether each item is steering or follow-up.
 - **AC-013**: Given queued work is visible, Then the queued text is not appended to chat history until normal message events represent delivered work.
+- **AC-014**: Given visible queue entries exist, When the RPC process stops, exits, restarts, or a new session is requested, Then the Queue Surface clears before any new session state is shown.
+- **AC-015**: Given full queue detail exists, When a count-only `get_state` response arrives, Then the app does not replace real visible entries with fake rows.
+- **AC-016**: Given `get_state.pendingMessageCount == 0` and the app has stale queue detail from an older active context, When the state response is applied, Then the Queue Surface shows empty state.
+- **AC-017**: Given a `queue_update` payload contains non-string values in either queue array, When the queue model is built, Then invalid values are ignored and the app does not crash.
 
 ## 6. Test Automation Strategy
 
@@ -196,6 +216,9 @@ State rules:
   - Decode `queue_update` arrays into ordered steering and follow-up queue entries.
   - Preserve pending count compatibility.
   - Clear entries on empty queue update.
+  - Clear entries on process/session context changes.
+  - Ignore invalid non-string queue array elements.
+  - Preserve count-only fallback without replacing real queue detail with placeholder entries.
   - Normalize and truncate visible summaries.
   - Render or compute empty, count-only, and entry states.
   - Verify queue updates do not mutate conversation messages or tool activity.
@@ -206,6 +229,8 @@ State rules:
 Issue 21 asks users to see pending steering and follow-up work without relying on the process log. The current native app has the typed RPC foundation from issue 3 and already decodes `queue_update`, but it only keeps `pendingMessageCount`. The Inspector currently displays this as a single "`N` queued" metric, which explains that something is pending but not what is pending or whether it is steering or follow-up work.
 
 The Pi RPC contract emits full pending queues whenever they change. The native app should therefore keep visible queue entries from `queue_update` and reserve `get_state.pendingMessageCount` for compatibility and count-only fallback. Because queue entries have no upstream ids or timestamps, the first slice should avoid edit/reorder/delete behavior and use deterministic display ids only for SwiftUI rendering.
+
+The current Pi RPC documentation also allows `prompt` commands submitted during streaming to become steering or follow-up work when `streamingBehavior` is set. That is a submission concern, not a visibility concern. This issue must render whatever queued work Pi reports through `queue_update` without changing the current native composer behavior.
 
 The Inspector is the first Queue Surface because it already presents process, model, pending count, and tool activity context. This keeps the first slice focused and avoids redesigning chat history or composer submission behavior.
 
@@ -299,5 +324,6 @@ Scenario: Long queued message
 
 - [CONTEXT.md](../CONTEXT.md)
 - [Native Pi Shell Architecture Improvements](../docs/improvements.md)
+- [Pi RPC Mode documentation](https://pi.dev/docs/latest/rpc)
 - [GitHub issue 3: Architecture: Typed RPC layer](https://github.com/MatheusBBarni/pi-agent-native/issues/3)
 - [GitHub issue 21: Add steering and follow-up queue UI](https://github.com/MatheusBBarni/pi-agent-native/issues/21)

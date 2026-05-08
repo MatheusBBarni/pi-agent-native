@@ -43,7 +43,7 @@
     "mode": "task",
     "openOnReview": true,
     "baseBranch": "main",
-    "title": "Symphony: from <head_branch> into <base_branch>",
+    "title": "Symphony: <issue_identifier> from <head_branch> into <base_branch>",
     "body": "Automated Task Pull Request opened by Symphony after the task reached review.\n\nIssue: <issue_identifier>\nTask Branch: <head_branch>\nPull Request Base Branch: <base_branch>\n\nReview this task before merging into the Protected Trunk Branch."
   },
   "stageAgents": {

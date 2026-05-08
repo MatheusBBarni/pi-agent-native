@@ -9,6 +9,7 @@ final class DefaultKeymapTests: XCTestCase {
 
         XCTAssertEqual(labelsByAction[.newChat] ?? [], ["Command-N"])
         XCTAssertEqual(labelsByAction[.openProject] ?? [], ["Command-O"])
+        XCTAssertEqual(labelsByAction[.openCommandPalette] ?? [], ["Command-K"])
         XCTAssertEqual(labelsByAction[.focusComposer] ?? [], ["Command-L"])
         XCTAssertEqual(labelsByAction[.refreshState] ?? [], ["Command-R"])
         XCTAssertEqual(labelsByAction[.openSettings] ?? [], ["Command-,"])

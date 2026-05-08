@@ -87,6 +87,15 @@ public struct AppShellView: View {
                 }
             }
 
+            if model.isShowingCommandPalette {
+                ModalBackdrop {
+                    model.closeCommandPalette()
+                } content: {
+                    CommandPaletteView()
+                        .environmentObject(model)
+                }
+            }
+
             if let request = model.extensionUIRouter.activeRequest {
                 ModalBackdrop {
                     model.cancelExtensionUIRequest()
@@ -106,6 +115,225 @@ public struct AppShellView: View {
         .onAppear {
             if !model.isConnected, model.selectedProject != nil {
                 model.start()
+            }
+        }
+    }
+}
+
+struct CommandPaletteView: View {
+    @EnvironmentObject private var model: AppModel
+    @FocusState private var isSearchFocused: Bool
+
+    private var items: [CommandPaletteItem] {
+        model.filteredCommandPaletteItems(query: model.commandPaletteQuery)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Image(systemName: "command")
+                    .uiFont(size: 17, weight: .semibold)
+                    .foregroundStyle(Theme.tertiaryText)
+
+                TextField("Search commands", text: $model.commandPaletteQuery)
+                    .textFieldStyle(.plain)
+                    .uiFont(size: 18, weight: .medium)
+                    .focused($isSearchFocused)
+
+                Button {
+                    model.closeCommandPalette()
+                } label: {
+                    Image(systemName: "xmark")
+                        .frame(width: 26, height: 26)
+                }
+                .buttonStyle(.plain)
+                .help(DefaultKeymap.helpText(for: .closeActiveModal) ?? "Close")
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+            .background(Theme.composerBackground)
+
+            Divider()
+                .overlay(Theme.border)
+
+            if items.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("No commands found")
+                        .uiFont(size: 14, weight: .medium)
+                    Text("Try another command, project, session, model, or app name.")
+                        .uiFont(size: 13)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                .frame(maxWidth: .infinity, minHeight: 140, alignment: .center)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(items) { item in
+                            CommandPaletteRow(
+                                item: item,
+                                isHighlighted: item.id == model.commandPaletteHighlightedItemID
+                            )
+                            .environmentObject(model)
+                        }
+                    }
+                    .padding(8)
+                }
+                .frame(maxHeight: CGFloat(12 * 48))
+                .scrollIndicators(.visible)
+            }
+        }
+        .frame(width: 680)
+        .background(Theme.panelBackground)
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Theme.border.opacity(0.9), lineWidth: 1)
+        )
+        .background(CommandPaletteKeyboardHandler(model: model))
+        .onAppear {
+            isSearchFocused = true
+            model.refreshCommandPaletteHighlight()
+        }
+        .onChange(of: model.commandPaletteQuery) { _, _ in
+            model.refreshCommandPaletteHighlight()
+        }
+    }
+}
+
+private struct CommandPaletteRow: View {
+    @EnvironmentObject private var model: AppModel
+    let item: CommandPaletteItem
+    let isHighlighted: Bool
+
+    var body: some View {
+        Button {
+            guard item.availability.isEnabled else { return }
+            model.runCommandPaletteItem(item)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: item.iconSystemName ?? "command")
+                    .uiFont(size: 15, weight: .medium)
+                    .foregroundStyle(item.availability.isEnabled ? Theme.secondaryText : Theme.tertiaryText.opacity(0.65))
+                    .frame(width: 22)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.title)
+                        .uiFont(size: 14, weight: .medium)
+                        .foregroundStyle(item.availability.isEnabled ? Theme.primaryText : Theme.secondaryText)
+                        .lineLimit(1)
+
+                    if let detailText {
+                        Text(detailText)
+                            .uiFont(size: 12)
+                            .foregroundStyle(Theme.tertiaryText)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer(minLength: 12)
+
+                if let keybindingLabel = item.keybindingLabel {
+                    Text(keybindingLabel)
+                        .uiFont(size: 12, weight: .medium)
+                        .foregroundStyle(Theme.secondaryText)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Theme.elevatedBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 46)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isHighlighted ? Theme.sidebarSelection : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!item.availability.isEnabled)
+        .onHover { isHovering in
+            if isHovering {
+                model.commandPaletteHighlightedItemID = item.id
+            }
+        }
+        .accessibilityLabel(item.title)
+        .accessibilityHint(detailText ?? item.title)
+    }
+
+    private var detailText: String? {
+        item.availability.disabledReason ?? item.subtitle
+    }
+}
+
+struct CommandPaletteKeyboardHandler: NSViewRepresentable {
+    @ObservedObject var model: AppModel
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            context.coordinator.window = view.window
+        }
+        context.coordinator.installMonitor()
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.model = model
+        DispatchQueue.main.async {
+            context.coordinator.window = nsView.window
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(model: model)
+    }
+
+    final class Coordinator {
+        weak var window: NSWindow?
+        var model: AppModel
+        private var monitor: Any?
+
+        init(model: AppModel) {
+            self.model = model
+        }
+
+        deinit {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+            }
+        }
+
+        func installMonitor() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self else { return event }
+                guard event.window === window else { return event }
+                guard event.normalizedKeybindingModifiers.isEmpty else { return event }
+
+                let handled = MainActor.assumeIsolated {
+                    self.handle(event)
+                }
+                return handled ? nil : event
+            }
+        }
+
+        @MainActor
+        private func handle(_ event: NSEvent) -> Bool {
+            guard model.isShowingCommandPalette else { return false }
+
+            switch event.keyCode {
+            case 125:
+                model.moveCommandPaletteHighlight(by: 1)
+                return true
+            case 126:
+                model.moveCommandPaletteHighlight(by: -1)
+                return true
+            case 36, 48, 76:
+                model.runHighlightedCommandPaletteItem()
+                return true
+            case 53:
+                model.closeCommandPalette()
+                return true
+            default:
+                return false
             }
         }
     }

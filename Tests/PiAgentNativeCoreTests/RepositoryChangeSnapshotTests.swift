@@ -39,6 +39,26 @@ final class RepositoryChangeSnapshotTests: XCTestCase {
         XCTAssertTrue(snapshot.files.isEmpty)
     }
 
+    func testUntrackedDiffHunkSizeUsesActualAddedLines() throws {
+        let root = try makeTemporaryRepository()
+        try write("one\n", to: "OneLine.txt", in: root)
+        try write("", to: "Empty.txt", in: root)
+
+        let snapshot = GitService.repositoryChangeSnapshot(
+            for: root.path,
+            loadedAt: Date(timeIntervalSince1970: 1)
+        )
+        let filesByPath = Dictionary(uniqueKeysWithValues: snapshot.files.map { ($0.path, $0) })
+
+        let oneLine = try XCTUnwrap(filesByPath["OneLine.txt"])
+        XCTAssertEqual(oneLine.hunks.first?.newCount, 1)
+        XCTAssertEqual(oneLine.hunks.flatMap(\.lines).filter { $0.kind == .addition }.map(\.text), ["one"])
+
+        let empty = try XCTUnwrap(filesByPath["Empty.txt"])
+        XCTAssertEqual(empty.hunks.first?.newCount, 0)
+        XCTAssertTrue(empty.hunks.flatMap(\.lines).filter { $0.kind == .addition }.isEmpty)
+    }
+
     private func makeTemporaryRepository() throws -> URL {
         let root = try makeTemporaryDirectory()
         try runGit(["init"], in: root)

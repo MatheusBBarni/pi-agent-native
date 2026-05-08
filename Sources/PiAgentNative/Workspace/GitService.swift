@@ -155,20 +155,29 @@ enum GitService {
     }
 
     private static func synthesizedAddedDiff(path: String, text: String) -> String {
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        let count = lines.isEmpty ? 0 : lines.count
+        let lines = addedDiffLines(from: text)
         var diff = [
             "diff --git a/\(path) b/\(path)",
             "new file mode 100644",
             "--- /dev/null",
             "+++ b/\(path)",
-            "@@ -0,0 +1,\(count) @@"
+            "@@ -0,0 +1,\(lines.count) @@"
         ].joined(separator: "\n")
 
-        if !text.isEmpty {
+        if !lines.isEmpty {
             diff += "\n" + lines.map { "+\($0)" }.joined(separator: "\n")
         }
         return diff
+    }
+
+    private static func addedDiffLines(from text: String) -> [String] {
+        guard !text.isEmpty else { return [] }
+
+        var lines = text.components(separatedBy: "\n")
+        if text.hasSuffix("\n") {
+            lines.removeLast()
+        }
+        return lines
     }
 
     private static func run(_ arguments: [String], cwd: String) -> String? {
@@ -193,11 +202,55 @@ enum GitService {
 
         do {
             try process.run()
+            let output = GitProcessOutput(stdout: stdout, stderr: stderr)
+            output.readToEndOfFile()
             process.waitUntilExit()
             guard process.terminationStatus == 0 else { return nil }
-            return stdout.fileHandleForReading.readDataToEndOfFile()
+            return output.stdoutData
         } catch {
             return nil
+        }
+    }
+
+    private final class GitProcessOutput {
+        private let stdout: Pipe
+        private let stderr: Pipe
+        private let lock = NSLock()
+        private var stdoutStorage = Data()
+
+        var stdoutData: Data {
+            lock.lock()
+            defer { lock.unlock() }
+            return stdoutStorage
+        }
+
+        init(stdout: Pipe, stderr: Pipe) {
+            self.stdout = stdout
+            self.stderr = stderr
+        }
+
+        func readToEndOfFile() {
+            let group = DispatchGroup()
+            group.enter()
+            DispatchQueue.global(qos: .utility).async { [stdout, weak self] in
+                let data = stdout.fileHandleForReading.readDataToEndOfFile()
+                self?.setStdoutData(data)
+                group.leave()
+            }
+
+            group.enter()
+            DispatchQueue.global(qos: .utility).async { [stderr] in
+                _ = stderr.fileHandleForReading.readDataToEndOfFile()
+                group.leave()
+            }
+
+            group.wait()
+        }
+
+        private func setStdoutData(_ data: Data) {
+            lock.lock()
+            stdoutStorage = data
+            lock.unlock()
         }
     }
 }
