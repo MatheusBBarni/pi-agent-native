@@ -310,7 +310,9 @@ final class PiRPCEventReducerTests: XCTestCase {
             position: 0
         )
 
-        XCTAssertEqual(entry.summary(maxLength: 12), "This queue...")
+        let truncated = entry.summary(maxLength: 12)
+        XCTAssertEqual(truncated, "This queu...")
+        XCTAssertLessThanOrEqual(truncated.count, 12)
         XCTAssertEqual(entry.summary(maxLength: 3), entry.summary)
     }
 }

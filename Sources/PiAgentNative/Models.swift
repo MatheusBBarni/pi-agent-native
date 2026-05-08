@@ -169,7 +169,7 @@ struct QueuedWorkEntry: Identifiable, Equatable {
         guard maxLength > 3, normalized.count > maxLength else {
             return normalized
         }
-        return String(normalized.prefix(maxLength - 2)) + "..."
+        return String(normalized.prefix(maxLength - 3)) + "..."
     }
 
     func summary(maxLength: Int, l10n: L10n) -> String {
@@ -177,7 +177,7 @@ struct QueuedWorkEntry: Identifiable, Equatable {
         guard maxLength > 3, normalized.count > maxLength else {
             return normalized
         }
-        return String(normalized.prefix(maxLength - 2)) + "..."
+        return String(normalized.prefix(maxLength - 3)) + "..."
     }
 
     static func normalizedSummary(for text: String) -> String {
