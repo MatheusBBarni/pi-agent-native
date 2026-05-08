@@ -46,7 +46,7 @@ struct ChangeReviewSheetView: View {
     private var header: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Changes")
+                Text(model.l10n.string("change_review.title"))
                     .uiFont(size: 20, weight: .semibold)
                 Text(headerDetail)
                     .uiFont(size: 12, design: .monospaced)
@@ -59,28 +59,28 @@ struct ChangeReviewSheetView: View {
             Button {
                 model.refreshRepositoryChangeSnapshot()
             } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
+                Label(model.l10n.string("change_review.refresh"), systemImage: "arrow.clockwise")
             }
 
             if !model.availableExternalTargets.isEmpty {
                 Menu {
                     ForEach(model.availableExternalTargets) { target in
-                        Button("Open Project in \(target.displayName)") {
+                        Button(model.l10n.string("change_review.open_project_in", target.displayName)) {
                             model.openExternally(target)
                         }
                         if let selectedFile {
-                            Button("Open File in \(target.displayName)") {
+                            Button(model.l10n.string("change_review.open_file_in", target.displayName)) {
                                 model.openChangedFileExternally(selectedFile, target: target)
                             }
                             .disabled(selectedFile.state == .deleted)
                         }
                     }
                 } label: {
-                    Label("Open Externally", systemImage: "arrow.up.forward.app")
+                    Label(model.l10n.string("change_review.open_externally"), systemImage: "arrow.up.forward.app")
                 }
             }
 
-            Button("Close") {
+            Button(model.l10n.string("change_review.close")) {
                 model.performAppAction(.closeActiveModal)
             }
         }
@@ -88,7 +88,7 @@ struct ChangeReviewSheetView: View {
 
     private var fileList: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SmallCapsLabel(title: "Changed Files")
+            SmallCapsLabel(title: model.l10n.string("change_review.changed_files.title"))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
 
@@ -120,55 +120,27 @@ struct ChangeReviewSheetView: View {
     @ViewBuilder
     private var detail: some View {
         if snapshot.status == .loading {
-            ChangeReviewEmptyState(title: "Refreshing changes", detail: "Reading Git status and diffs.")
+            ChangeReviewEmptyState(
+                title: model.l10n.string("change_review.refreshing.title"),
+                detail: model.l10n.string("change_review.refreshing.detail")
+            )
         } else if let selectedFile {
-            DiffDetailView(file: selectedFile)
+            DiffDetailView(file: selectedFile, l10n: model.l10n)
         } else {
             ChangeReviewEmptyState(title: emptyTitle, detail: emptyDetail)
         }
     }
 
     private var headerDetail: String {
-        switch snapshot.status {
-        case .loading:
-            return "Refreshing repository changes"
-        case .dirty:
-            return "\(snapshot.files.count) changed file\(snapshot.files.count == 1 ? "" : "s") on \(snapshot.branch)"
-        case .clean:
-            return "No changes on \(snapshot.branch)"
-        case .notRepository:
-            return "Selected Project is not a Git repository"
-        case .unavailable(let reason):
-            return reason
-        case .failed(let message):
-            return message
-        }
+        ChangeReviewPresentation.headerDetail(for: snapshot, l10n: model.l10n)
     }
 
     private var emptyTitle: String {
-        switch snapshot.status {
-        case .notRepository:
-            return "No Git repository"
-        case .unavailable:
-            return "No project selected"
-        case .failed:
-            return "Changes unavailable"
-        default:
-            return "No changes"
-        }
+        ChangeReviewPresentation.emptyTitle(for: snapshot, l10n: model.l10n)
     }
 
     private var emptyDetail: String {
-        switch snapshot.status {
-        case .notRepository:
-            return "Open a Git repository to review changes."
-        case .unavailable(let reason):
-            return reason
-        case .failed(let message):
-            return message
-        default:
-            return "The Selected Project worktree is clean."
-        }
+        ChangeReviewPresentation.emptyDetail(for: snapshot, l10n: model.l10n)
     }
 
     private func ensureValidSelection() {
@@ -222,6 +194,7 @@ private struct ChangeFileRow: View {
 
 private struct DiffDetailView: View {
     let file: ChangedFile
+    let l10n: L10n
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -243,7 +216,7 @@ private struct DiffDetailView: View {
                 .overlay(Theme.border)
 
             if file.hunks.isEmpty {
-                ChangeReviewEmptyState(title: "Diff unavailable", detail: diffStatusText)
+                ChangeReviewEmptyState(title: l10n.string("change_review.diff.unavailable.title"), detail: diffStatusText)
             } else {
                 ScrollView([.vertical, .horizontal]) {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -262,14 +235,97 @@ private struct DiffDetailView: View {
     }
 
     private var diffStatusText: String {
+        ChangeReviewPresentation.diffStatusText(for: file, l10n: l10n)
+    }
+}
+
+enum ChangeReviewPresentation {
+    static func headerDetail(for snapshot: RepositoryChangeSnapshot, l10n: L10n) -> String {
+        switch snapshot.status {
+        case .loading:
+            return l10n.string("change_review.header.loading")
+        case .dirty:
+            return l10n.plural(
+                "change_review.header.changed_files_on_branch",
+                count: snapshot.files.count,
+                snapshot.branch
+            )
+        case .clean:
+            return l10n.string("change_review.header.clean_on_branch", snapshot.branch)
+        case .notRepository:
+            return l10n.string("change_review.header.not_repository")
+        case .unavailable(let reason):
+            return localizedGitMessage(reason, l10n: l10n)
+        case .failed(let message):
+            return localizedGitMessage(message, l10n: l10n)
+        }
+    }
+
+    static func emptyTitle(for snapshot: RepositoryChangeSnapshot, l10n: L10n) -> String {
+        switch snapshot.status {
+        case .notRepository:
+            return l10n.string("change_review.empty.not_repository.title")
+        case .unavailable:
+            return l10n.string("change_review.empty.no_project_selected.title")
+        case .failed:
+            return l10n.string("change_review.empty.changes_unavailable.title")
+        default:
+            return l10n.string("change_review.empty.clean.title")
+        }
+    }
+
+    static func emptyDetail(for snapshot: RepositoryChangeSnapshot, l10n: L10n) -> String {
+        switch snapshot.status {
+        case .notRepository:
+            return l10n.string("change_review.empty.not_repository.detail")
+        case .unavailable(let reason):
+            return localizedGitMessage(reason, l10n: l10n)
+        case .failed(let message):
+            return localizedGitMessage(message, l10n: l10n)
+        default:
+            return l10n.string("change_review.empty.clean.detail")
+        }
+    }
+
+    static func diffStatusText(for file: ChangedFile, l10n: L10n) -> String {
         switch file.diffStatus {
         case .notLoaded:
-            return "Diff not loaded"
+            return l10n.string("change_review.diff.not_loaded")
         case .loading:
-            return "Loading diff"
+            return l10n.string("change_review.diff.loading")
         case .loaded:
-            return file.isBinary ? "Binary file" : "Text diff"
+            return file.isBinary
+                ? l10n.string("change_review.diff.binary")
+                : l10n.string("change_review.diff.text")
         case .unavailable(let message), .failed(let message):
+            return localizedGitMessage(message, l10n: l10n)
+        }
+    }
+
+    static func localizedGitMessage(_ message: String, l10n: L10n) -> String {
+        switch message {
+        case "Could not read Git status.":
+            return l10n.string("change_review.git_error.read_status")
+        case "Diff unavailable because this repository has no HEAD yet.":
+            return l10n.string("change_review.git_error.no_head")
+        case "Binary file diff is not shown.":
+            return l10n.string("change_review.git_error.binary_diff_not_shown")
+        case "No textual diff available.":
+            return l10n.string("change_review.git_error.no_textual_diff")
+        case "Untracked file is not readable.":
+            return l10n.string("change_review.git_error.untracked_not_readable")
+        case "Untracked directory diff is not shown.":
+            return l10n.string("change_review.git_error.untracked_directory_not_shown")
+        case "Untracked file is too large for native preview.":
+            return l10n.string("change_review.git_error.untracked_too_large")
+        case "Untracked binary file diff is not shown.":
+            return l10n.string("change_review.git_error.untracked_binary_not_shown")
+        default:
+            let prefix = "Could not load diff for "
+            if message.hasPrefix(prefix), message.hasSuffix(".") {
+                let path = String(message.dropFirst(prefix.count).dropLast())
+                return l10n.string("change_review.git_error.load_diff_failed", path)
+            }
             return message
         }
     }

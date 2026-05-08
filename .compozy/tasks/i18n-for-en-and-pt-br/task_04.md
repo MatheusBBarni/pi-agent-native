@@ -1,11 +1,11 @@
 ---
-status: pending
+status: completed
 title: "Localize Assignment-Time AppModel Strings"
 type: backend
 complexity: high
 dependencies:
-  - task_02
-  - task_03
+    - task_02
+    - task_03
 ---
 
 # Task 04: Localize Assignment-Time AppModel Strings

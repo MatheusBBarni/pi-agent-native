@@ -21,7 +21,8 @@ enum GitService {
         return GitBranchDetails(
             branch: resolvedBranch,
             hasChanges: changedLines > 0,
-            changeSummary: changedLines > 0 ? "\(changedLines) changed file\(changedLines == 1 ? "" : "s")" : "No changes"
+            changeSummary: changedLines > 0 ? "\(changedLines) changed file\(changedLines == 1 ? "" : "s")" : "No changes",
+            changedFileCount: changedLines
         )
     }
 

@@ -106,6 +106,7 @@ struct GitBranchDetails: Equatable {
     var branch: String = "Not a git repository"
     var hasChanges: Bool = false
     var changeSummary: String = "No changes"
+    var changedFileCount: Int? = nil
 }
 
 enum QueuedWorkKind: String, Equatable {
@@ -118,6 +119,15 @@ enum QueuedWorkKind: String, Equatable {
             return "Steering"
         case .followUp:
             return "Follow-up"
+        }
+    }
+
+    func title(l10n: L10n) -> String {
+        switch self {
+        case .steering:
+            return l10n.string("inspector.queued_work.kind.steering")
+        case .followUp:
+            return l10n.string("inspector.queued_work.kind.follow_up")
         }
     }
 }
@@ -139,12 +149,31 @@ struct QueuedWorkEntry: Identifiable, Equatable {
         kind.title
     }
 
+    func title(l10n: L10n) -> String {
+        kind.title(l10n: l10n)
+    }
+
     var summary: String {
         Self.normalizedSummary(for: text)
     }
 
+    func summary(l10n: L10n) -> String {
+        let normalized = text
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        return normalized.isEmpty ? l10n.string("inspector.queued_work.empty_message") : normalized
+    }
+
     func summary(maxLength: Int) -> String {
         let normalized = summary
+        guard maxLength > 3, normalized.count > maxLength else {
+            return normalized
+        }
+        return String(normalized.prefix(maxLength - 3)) + "..."
+    }
+
+    func summary(maxLength: Int, l10n: L10n) -> String {
+        let normalized = summary(l10n: l10n)
         guard maxLength > 3, normalized.count > maxLength else {
             return normalized
         }

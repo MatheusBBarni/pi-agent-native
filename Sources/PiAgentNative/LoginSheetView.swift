@@ -18,17 +18,17 @@ struct LoginSheetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
-                Text("Login")
+                Text(model.l10n.string("auth.login_sheet.title"))
                     .uiFont(size: 20, weight: .semibold)
                 Spacer()
-                Button("Done") {
+                Button(model.l10n.string("auth.login_sheet.done")) {
                     model.dismissLoginSheet()
                 }
             }
 
-            Picker("Authentication", selection: $authMethod) {
-                Text("API key").tag(AuthMethod.apiKey)
-                Text("Subscription").tag(AuthMethod.subscription)
+            Picker(model.l10n.string("auth.login_sheet.authentication_picker"), selection: $authMethod) {
+                Text(model.l10n.string("auth.login_sheet.auth_method.api_key")).tag(AuthMethod.apiKey)
+                Text(model.l10n.string("auth.login_sheet.auth_method.subscription")).tag(AuthMethod.subscription)
             }
             .pickerStyle(.segmented)
 
@@ -54,24 +54,24 @@ struct LoginSheetView: View {
 
     private var apiKeyPane: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Provider")
+            Text(model.l10n.string("auth.login_sheet.provider_label"))
                 .uiFont(size: 13, weight: .medium)
                 .foregroundStyle(Theme.secondaryText)
 
-            Picker("Provider", selection: $selectedAPIProvider) {
+            Picker(model.l10n.string("auth.login_sheet.provider_picker"), selection: $selectedAPIProvider) {
                 ForEach(LoginProvider.apiKeyProviders) { provider in
                     Text(provider.name).tag(provider)
                 }
             }
 
-            SecureField("API key", text: $apiKey)
+            SecureField(model.l10n.string("auth.login_sheet.api_key_placeholder"), text: $apiKey)
                 .textFieldStyle(.plain)
                 .uiFont(size: 13, design: .monospaced)
                 .padding(10)
                 .background(Theme.composerBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
 
-            Text("Saved to \(NativeAuthStore.authFileURL.path)")
+            Text(model.l10n.string("auth.login_sheet.saved_to_path", NativeAuthStore.authFileURL.path))
                 .uiFont(size: 11, design: .monospaced)
                 .foregroundStyle(Theme.tertiaryText)
                 .textSelection(.enabled)
@@ -83,14 +83,14 @@ struct LoginSheetView: View {
             }
 
             HStack {
-                Button("Logout Provider") {
+                Button(model.l10n.string("auth.login_sheet.logout_provider")) {
                     model.logout(provider: selectedAPIProvider)
                 }
                 .disabled(!NativeAuthStore.hasCredential(provider: selectedAPIProvider.id))
 
                 Spacer()
 
-                Button("Save API Key") {
+                Button(model.l10n.string("auth.login_sheet.save_api_key")) {
                     do {
                         try model.saveAPIKey(provider: selectedAPIProvider, apiKey: apiKey)
                         apiKey = ""
@@ -106,48 +106,48 @@ struct LoginSheetView: View {
 
     private var subscriptionPane: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Provider")
+            Text(model.l10n.string("auth.login_sheet.provider_label"))
                 .uiFont(size: 13, weight: .medium)
                 .foregroundStyle(Theme.secondaryText)
 
-            Picker("Provider", selection: $selectedSubscriptionProvider) {
+            Picker(model.l10n.string("auth.login_sheet.provider_picker"), selection: $selectedSubscriptionProvider) {
                 ForEach(LoginProvider.subscriptionProviders) { provider in
                     Text(provider.name).tag(provider)
                 }
             }
 
-            Text("Use the terminal command `pi /login` to authenticate your subscription.")
+            Text(model.l10n.string("auth.login_sheet.subscription_command_help"))
                 .uiFont(size: 12)
                 .foregroundStyle(Theme.secondaryText)
 
             HStack {
-                Button(oauthRunner.isRunning ? "Running..." : "Start Login") {
+                Button(oauthRunner.isRunning ? model.l10n.string("auth.login_sheet.running") : model.l10n.string("auth.login_sheet.start_login")) {
                     loginURLOpeningTracker.reset()
                     model.startSubscriptionLogin(provider: selectedSubscriptionProvider)
                 }
                 .disabled(oauthRunner.isRunning)
 
                 if let url = oauthRunner.lastURL {
-                    Button("Open Link") {
+                    Button(model.l10n.string("auth.login_sheet.open_link")) {
                         NSWorkspace.shared.open(url)
                     }
                 }
 
-                Button("Logout Provider") {
+                Button(model.l10n.string("auth.login_sheet.logout_provider")) {
                     model.logout(provider: selectedSubscriptionProvider)
                 }
                 .disabled(oauthRunner.isRunning || !NativeAuthStore.hasCredential(provider: selectedSubscriptionProvider.id))
 
                 Spacer()
 
-                Button("Stop") {
+                Button(model.l10n.string("auth.login_sheet.stop")) {
                     model.stopSubscriptionLogin()
                 }
                 .disabled(!oauthRunner.isRunning)
             }
 
             ScrollView {
-                Text(oauthRunner.output.isEmpty ? "Use `pi /login` in terminal to complete subscription authentication." : oauthRunner.output)
+                Text(oauthRunner.output.isEmpty ? model.l10n.string("auth.login_sheet.oauth_output_placeholder") : oauthRunner.output)
                     .uiFont(size: 12, design: .monospaced)
                     .foregroundStyle(Theme.secondaryText)
                     .textSelection(.enabled)
@@ -159,7 +159,7 @@ struct LoginSheetView: View {
             .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
 
             HStack {
-                TextField("Paste terminal responses here when needed", text: $terminalInput)
+                TextField(model.l10n.string("auth.login_sheet.terminal_input_placeholder"), text: $terminalInput)
                     .textFieldStyle(.plain)
                     .uiFont(size: 12, design: .monospaced)
                     .padding(9)
@@ -170,7 +170,7 @@ struct LoginSheetView: View {
                         terminalInput = ""
                     }
 
-                Button("Send") {
+                Button(model.l10n.string("auth.login_sheet.send")) {
                     oauthRunner.sendInput(terminalInput)
                     terminalInput = ""
                 }
@@ -199,29 +199,15 @@ private struct AccessStatusSummaryView: View {
     }
 
     private var title: String {
-        switch model.authAccess.authentication {
-        case .unknown:
-            return "Authentication not checked"
-        case .unauthenticated:
-            return "Not logged in"
-        case .authenticating(let providerID):
-            return "Logging in to \(providerID)"
-        case .authenticated(let providerID):
-            return "Authenticated\(providerID.map { " with \($0)" } ?? "")"
-        case .failed:
-            return "Authentication error"
-        }
+        summary.title
     }
 
     private var detail: String {
-        let modelMessage = model.authAccess.modelAccess.unavailableMessage
-        let subscriptionMessage = model.authAccess.subscriptionAccess.unavailableMessage
-        if model.authAccess.hasAvailableModelAccess {
-            return model.authAccess.hasActiveSubscriptionAccess
-                ? "Model access and subscription access are active."
-                : "Model access is active. \(subscriptionMessage)"
-        }
-        return "\(modelMessage) \(subscriptionMessage)"
+        summary.detail
+    }
+
+    private var summary: SubscriptionLoginStatusSummary {
+        SubscriptionLoginStatusSummary(authAccess: model.authAccess, l10n: model.l10n)
     }
 }
 
@@ -247,15 +233,15 @@ struct ModelPickerSheetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Select Model")
+                Text(model.l10n.string("auth.model_picker.title"))
                     .uiFont(size: 20, weight: .semibold)
                 Spacer()
-                Button("Refresh") {
+                Button(model.l10n.string("auth.model_picker.refresh")) {
                     model.refreshState()
                 }
             }
 
-            TextField("Search models", text: $searchText)
+            TextField(model.l10n.string("auth.model_picker.search_placeholder"), text: $searchText)
                 .textFieldStyle(.plain)
                 .padding(10)
                 .background(Theme.composerBackground)
@@ -298,15 +284,15 @@ struct ModelPickerSheetView: View {
 
     private var emptyTitle: String {
         if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !model.availableModels.isEmpty {
-            return "No models match your search"
+            return model.l10n.string("auth.model_picker.empty.title.no_search_results")
         }
-        return model.authAccess.modelPickerEmptyTitle
+        return model.authAccess.modelPickerEmptyTitle(l10n: model.l10n)
     }
 
     private var emptyDetail: String {
         if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !model.availableModels.isEmpty {
-            return "Try a different provider, model name, or model id."
+            return model.l10n.string("auth.model_picker.empty.detail.no_search_results")
         }
-        return model.authAccess.modelPickerEmptyDetail
+        return model.authAccess.modelPickerEmptyDetail(l10n: model.l10n)
     }
 }

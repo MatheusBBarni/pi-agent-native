@@ -1,10 +1,10 @@
 ---
-status: pending
+status: completed
 title: "Package Localization Resources in App Bundle"
 type: infra
 complexity: medium
 dependencies:
-  - task_01
+    - task_01
 ---
 
 # Task 10: Package Localization Resources in App Bundle
@@ -29,11 +29,11 @@ Update manual app bundling so the clickable `.app` includes SwiftPM localization
 </requirements>
 
 ## Subtasks
-- [ ] 10.1 Discover the generated SwiftPM resource bundle after build.
-- [ ] 10.2 Copy the resource bundle into `Contents/Resources`.
-- [ ] 10.3 Add localization metadata to generated `Info.plist` if required.
-- [ ] 10.4 Verify debug and release packaging paths.
-- [ ] 10.5 Add or document a packaged-resource verification check.
+- [x] 10.1 Discover the generated SwiftPM resource bundle after build.
+- [x] 10.2 Copy the resource bundle into `Contents/Resources`.
+- [x] 10.3 Add localization metadata to generated `Info.plist` if required.
+- [x] 10.4 Verify debug and release packaging paths.
+- [x] 10.5 Add or document a packaged-resource verification check.
 
 ## Implementation Details
 Follow ADR-004: package the SwiftPM-generated bundle so `Bundle.module` lookup matches runtime expectations. Avoid hard-coded paths that break across build configurations when discoverable alternatives exist.

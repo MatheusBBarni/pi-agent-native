@@ -24,6 +24,15 @@ final class DefaultKeymapTests: XCTestCase {
         XCTAssertEqual(labelsByAction[.closeActiveModal] ?? [], ["Escape"])
     }
 
+    func testDefaultKeymapStableIDsDoNotUseLocalizedTitles() {
+        let englishID = DefaultKeymap.firstDefinition(for: .newChat)?.id
+        let portugueseTitle = DefaultKeymap.title(for: .newChat, l10n: L10n(language: .portugueseBrazil))
+
+        XCTAssertEqual(englishID, "newChat-App-wide-Command-N")
+        XCTAssertEqual(portugueseTitle, "Novo chat")
+        XCTAssertFalse(englishID?.contains("Novo") == true)
+    }
+
     func testDefaultKeymapHasNoUnexpectedConflicts() {
         XCTAssertTrue(DefaultKeymap.conflicts().isEmpty)
     }
@@ -74,6 +83,37 @@ final class DefaultKeymapTests: XCTestCase {
         XCTAssertEqual(DefaultKeymap.title(for: .toggleInspector), "Toggle inspector")
     }
 
+    func testLocalizedActionTitlesUseLookupWithoutChangingShortcutLabels() {
+        let english = L10n(language: .english)
+        let portuguese = L10n(language: .portugueseBrazil)
+
+        XCTAssertEqual(DefaultKeymap.title(for: .openProject, l10n: english), "Open project")
+        XCTAssertEqual(DefaultKeymap.title(for: .openProject, l10n: portuguese), "Abrir projeto")
+        XCTAssertEqual(DefaultKeymap.displayLabel(for: .openProject), "Command-O")
+        XCTAssertEqual(DefaultKeymap.displayLabel(for: .newChat), "Command-N")
+    }
+
+    func testLocalizedHelpTextCombinesLocalizedTitleWithUnchangedShortcutLabel() {
+        let portuguese = L10n(language: .portugueseBrazil)
+
+        XCTAssertEqual(
+            DefaultKeymap.helpText(for: .openKeybindingHelp, l10n: portuguese),
+            "Abrir Atalhos de Teclado - Command-/"
+        )
+        XCTAssertEqual(
+            DefaultKeymap.helpText(for: .openProcessLog, title: "Registro", l10n: portuguese),
+            "Registro - Command-Shift-L"
+        )
+    }
+
+    func testKeybindingHelpGroupsLocalizeDisplayTitlesOnly() {
+        let portuguese = L10n(language: .portugueseBrazil)
+
+        XCTAssertEqual(KeybindingHelpGroup.composer.rawValue, "Composer")
+        XCTAssertEqual(KeybindingHelpGroup.composer.localizedTitle(l10n: portuguese), "Compositor")
+        XCTAssertEqual(KeybindingHelpGroup.navigation.localizedTitle(l10n: portuguese), "Navegação")
+    }
+
     @MainActor
     func testActionAvailabilityForSendPromptAndEscapePriority() {
         let model = AppModel()
@@ -120,6 +160,7 @@ final class DefaultKeymapTests: XCTestCase {
     @MainActor
     func testDismissRunningSubscriptionLoginWaitsForActualExitStatus() {
         let model = AppModel()
+        model.appLanguage = .english
         let provider = LoginProvider(id: "openai-codex", name: "ChatGPT / OpenAI Codex")
         let attemptID = UUID()
         model.isShowingLogin = true
@@ -162,6 +203,7 @@ final class DefaultKeymapTests: XCTestCase {
     @MainActor
     func testSubscriptionGateFailsClosedWithStatusReason() {
         let model = AppModel()
+        model.appLanguage = .english
         model.authAccess.subscriptionAccess = .refreshing
 
         XCTAssertFalse(model.canPerformSubscriptionGatedAction())

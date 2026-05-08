@@ -97,33 +97,43 @@ private struct SidebarToggleButtonView: View {
     var body: some View {
         HeaderIconButton(
             systemImage: "sidebar.left",
-            title: "Show sidebar",
+            title: model.l10n.string("app_shell.header.show_sidebar"),
             actionID: .toggleSidebar,
             isEnabled: model.canPerformAppAction(.toggleSidebar),
-            disabledHelp: "Close active modal first"
+            disabledHelp: model.l10n.string("app_model.status.close_active_modal_first"),
+            l10n: model.l10n
         ) {
             model.performAppAction(.toggleSidebar)
         }
-        .accessibilityValue(Text("Sidebar hidden"))
-        .accessibilityHint(Text("Shows the sidebar"))
+        .accessibilityValue(Text(model.l10n.string("app_shell.header.sidebar_hidden")))
+        .accessibilityHint(Text(model.l10n.string("app_shell.header.shows_sidebar")))
     }
 }
 
 struct InspectorToggleButtonPresentation: Equatable {
     let isInspectorVisible: Bool
     let isEnabled: Bool
+    var language: AppLanguage = .english
 
     var iconSystemName: String { "sidebar.right" }
     var isHighlighted: Bool { !isInspectorVisible }
-    var helpText: String { DefaultKeymap.helpText(for: .toggleInspector) ?? "Toggle inspector" }
-    var accessibilityHint: String { "Toggles the inspector pane" }
+    var helpText: String { DefaultKeymap.helpText(for: .toggleInspector, l10n: l10n) ?? l10n.string("app_action.toggle_inspector.title") }
+    var accessibilityHint: String { l10n.string("app_shell.inspector_toggle.hint") }
 
     var accessibilityLabel: String {
-        isInspectorVisible ? "Hide inspector" : "Show inspector"
+        isInspectorVisible
+            ? l10n.string("app_shell.inspector_toggle.hide")
+            : l10n.string("app_shell.inspector_toggle.show")
     }
 
     var accessibilityValue: String {
-        isInspectorVisible ? "Inspector visible" : "Inspector hidden"
+        isInspectorVisible
+            ? l10n.string("app_shell.inspector_toggle.visible")
+            : l10n.string("app_shell.inspector_toggle.hidden")
+    }
+
+    private var l10n: L10n {
+        L10n(language: language)
     }
 }
 
@@ -133,7 +143,8 @@ private struct InspectorToggleButtonView: View {
     var body: some View {
         let presentation = InspectorToggleButtonPresentation(
             isInspectorVisible: model.isInspectorVisible,
-            isEnabled: model.canPerformAppAction(.toggleInspector)
+            isEnabled: model.canPerformAppAction(.toggleInspector),
+            language: model.appLanguage
         )
 
         Button {
@@ -188,9 +199,9 @@ struct ExternalTargetMenuView: View {
         }
         .menuStyle(.borderlessButton)
         .disabled(model.selectedProject == nil)
-        .help(model.selectedProject == nil ? "Open a project first" : "Open externally")
-        .accessibilityLabel("Open externally")
-        .accessibilityHint(model.selectedProject == nil ? "Open a project first" : "Opens the selected project in another app")
+        .help(model.selectedProject == nil ? model.l10n.string("app_model.availability.open_project_first") : model.l10n.string("app_shell.external.open_externally"))
+        .accessibilityLabel(model.l10n.string("app_shell.external.open_externally"))
+        .accessibilityHint(model.selectedProject == nil ? model.l10n.string("app_model.availability.open_project_first") : model.l10n.string("app_shell.external.hint"))
     }
 }
 
@@ -225,9 +236,9 @@ struct EmptyConversationView: View {
 
             if model.selectedProject != nil {
                 VStack(alignment: .leading, spacing: 12) {
-                    SuggestedPrompt(text: "Inspect this repository and suggest the native pi shell architecture.")
-                    SuggestedPrompt(text: "Start a new pi session for the current workspace.")
-                    SuggestedPrompt(text: "List available pi commands and installed skills.")
+                    ForEach(SuggestedPromptContent.defaults(l10n: model.l10n), id: \.id) { prompt in
+                        SuggestedPrompt(content: prompt)
+                    }
                 }
                 .frame(maxWidth: 620)
             }
@@ -237,22 +248,55 @@ struct EmptyConversationView: View {
 
     private var title: String {
         guard model.selectedProject != nil else {
-            return "Open a project to start working with pi."
+            return model.l10n.string("chat.empty.open_project_title")
         }
-        return "What should we work on in \(URL(fileURLWithPath: model.workspacePath).lastPathComponent)?"
+        return model.l10n.string(
+            "chat.empty.workspace_title",
+            URL(fileURLWithPath: model.workspacePath).lastPathComponent
+        )
+    }
+}
+
+struct SuggestedPromptContent: Equatable {
+    let id: String
+    let promptText: String
+    let displayText: String
+
+    static let inspectRepositoryPrompt = "Inspect this repository and suggest the native pi shell architecture."
+    static let startSessionPrompt = "Start a new pi session for the current workspace."
+    static let listCommandsPrompt = "List available pi commands and installed skills."
+
+    static func defaults(l10n: L10n) -> [SuggestedPromptContent] {
+        [
+            SuggestedPromptContent(
+                id: "inspect-repository",
+                promptText: inspectRepositoryPrompt,
+                displayText: l10n.string("chat.suggest.inspect_repository")
+            ),
+            SuggestedPromptContent(
+                id: "start-session",
+                promptText: startSessionPrompt,
+                displayText: l10n.string("chat.suggest.start_session")
+            ),
+            SuggestedPromptContent(
+                id: "list-commands",
+                promptText: listCommandsPrompt,
+                displayText: l10n.string("chat.suggest.list_commands")
+            )
+        ]
     }
 }
 
 struct SuggestedPrompt: View {
     @EnvironmentObject private var model: AppModel
-    let text: String
+    let content: SuggestedPromptContent
 
     var body: some View {
         Button {
-            model.composerText = text
+            model.composerText = content.promptText
         } label: {
             HStack {
-                Text(text)
+                Text(content.displayText)
                     .uiFont(size: 14)
                     .foregroundStyle(Theme.secondaryText)
                     .lineLimit(2)
@@ -287,7 +331,7 @@ struct ComposerView: View {
             HStack(spacing: 12) {
                 Menu {
                     if model.projects.isEmpty {
-                        Text("No projects")
+                        Text(model.l10n.string("chat.composer.no_projects"))
                     } else {
                         ForEach(model.projects) { project in
                             Button {
@@ -305,7 +349,7 @@ struct ComposerView: View {
                     HStack(spacing: 12) {
                         Image(systemName: "plus")
                             .foregroundStyle(Theme.secondaryText)
-                        Text(model.selectedProject?.name ?? "Select project")
+                        Text(model.selectedProject?.name ?? model.l10n.string("chat.composer.select_project"))
                             .uiFont(size: 13, weight: .medium)
                             .foregroundStyle(model.selectedProject == nil ? Theme.tertiaryText : Theme.secondaryText)
                             .lineLimit(1)
@@ -314,7 +358,7 @@ struct ComposerView: View {
                 .menuStyle(.borderlessButton)
                 .disabled(!canSelectProjectForNewChat)
                 .help(projectSelectionHelpText)
-                .accessibilityLabel("Select project for new chat")
+                .accessibilityLabel(model.l10n.string("chat.composer.select_project_accessibility"))
                 .accessibilityHint(projectSelectionHelpText)
 
                 Spacer()
@@ -327,7 +371,7 @@ struct ComposerView: View {
                 .buttonStyle(IconButtonStyle())
                 .disabled(!model.canPerformAppAction(.refreshState))
                 .help(refreshStateHelpText)
-                .accessibilityLabel("Refresh state")
+                .accessibilityLabel(model.localizedTitle(for: .refreshState))
                 .accessibilityHint(refreshStateHelpText)
 
                 Button {
@@ -341,24 +385,24 @@ struct ComposerView: View {
                 .buttonStyle(.plain)
                 .disabled(model.hasActiveModal)
                 .help(modelPickerHelpText)
-                .accessibilityLabel("Select model")
+                .accessibilityLabel(model.l10n.string("app_shell.composer.select_model"))
                 .accessibilityHint(modelPickerHelpText)
 
                 Menu {
                     ForEach(["off", "minimal", "low", "medium", "high", "xhigh"], id: \.self) { level in
-                        Button(level.capitalized) {
+                        Button(thinkingLevelDisplay(level)) {
                             model.setThinkingLevel(level)
                         }
                     }
                 } label: {
-                    Text(model.thinkingLevel.capitalized)
+                    Text(thinkingLevelDisplay(model.thinkingLevel))
                         .uiFont(size: 13)
                         .foregroundStyle(Theme.tertiaryText)
                 }
                 .menuStyle(.borderlessButton)
                 .disabled(model.hasActiveModal)
                 .help(thinkingLevelHelpText)
-                .accessibilityLabel("Thinking level")
+                .accessibilityLabel(model.l10n.string("app_shell.composer.thinking_level"))
                 .accessibilityHint(thinkingLevelHelpText)
 
                 Button {
@@ -374,7 +418,7 @@ struct ComposerView: View {
                 .buttonStyle(.plain)
                 .disabled(!canActivateSendButton)
                 .help(sendButtonHelp)
-                .accessibilityLabel(model.isStreaming ? "Stop generation" : "Send prompt")
+                .accessibilityLabel(model.localizedTitle(for: model.isStreaming ? .stopGeneration : .sendPrompt))
                 .accessibilityHint(sendButtonHelp)
             }
             .padding(.horizontal, 10)
@@ -393,18 +437,18 @@ struct ComposerView: View {
 
     private var projectSelectionHelpText: String {
         if model.hasActiveModal {
-            return "Close active modal first"
+            return model.l10n.string("app_model.status.close_active_modal_first")
         }
 
         if model.isStreaming {
-            return "Stop generation first"
+            return model.l10n.string("app_shell.composer.stop_generation_first")
         }
 
         if model.projects.isEmpty {
-            return "Open a project first"
+            return model.l10n.string("app_model.availability.open_project_first")
         }
 
-        return "Select project for new chat"
+        return model.l10n.string("app_shell.composer.select_project_for_new_chat")
     }
 
     private var promptEditor: some View {
@@ -412,7 +456,7 @@ struct ComposerView: View {
             text: $model.composerText,
             focusRequest: model.composerFocusRequest,
             selectedRange: $model.composerSelectionRange,
-            placeholder: "Ask pi to work in this workspace",
+            placeholder: model.l10n.string("chat.composer.placeholder"),
             fontSize: model.uiFontSize,
             isEditable: !model.isStreaming,
             pendingTextReplacement: model.pendingMentionTextReplacement,
@@ -455,26 +499,47 @@ struct ComposerView: View {
 
     private var refreshStateHelpText: String {
         if model.canPerformAppAction(.refreshState) {
-            return DefaultKeymap.helpText(for: .refreshState) ?? "Refresh state"
+            return DefaultKeymap.helpText(for: .refreshState, l10n: model.l10n) ?? model.localizedTitle(for: .refreshState)
         }
 
         if model.hasActiveModal {
-            return "Close active modal first"
+            return model.l10n.string("app_model.status.close_active_modal_first")
         }
 
-        return "Open a project first"
+        return model.l10n.string("app_model.availability.open_project_first")
     }
 
     private var modelPickerHelpText: String {
-        model.hasActiveModal ? "Close active modal first" : "Select model"
+        model.hasActiveModal
+            ? model.l10n.string("app_model.status.close_active_modal_first")
+            : model.l10n.string("app_shell.composer.select_model")
     }
 
     private var thinkingLevelHelpText: String {
         if model.hasActiveModal {
-            return "Close active modal first"
+            return model.l10n.string("app_model.status.close_active_modal_first")
         }
 
-        return DefaultKeymap.helpText(for: .cycleThinkingLevel) ?? "Cycle thinking level"
+        return DefaultKeymap.helpText(for: .cycleThinkingLevel, l10n: model.l10n) ?? model.localizedTitle(for: .cycleThinkingLevel)
+    }
+
+    private func thinkingLevelDisplay(_ level: String) -> String {
+        switch level.lowercased() {
+        case "off":
+            return model.l10n.string("command_palette.thinking.level.off")
+        case "minimal":
+            return model.l10n.string("command_palette.thinking.level.minimal")
+        case "low":
+            return model.l10n.string("command_palette.thinking.level.low")
+        case "medium":
+            return model.l10n.string("command_palette.thinking.level.medium")
+        case "high":
+            return model.l10n.string("command_palette.thinking.level.high")
+        case "xhigh":
+            return model.l10n.string("command_palette.thinking.level.xhigh")
+        default:
+            return level
+        }
     }
 
     private var canActivateSendButton: Bool {
@@ -487,26 +552,26 @@ struct ComposerView: View {
 
     private var sendButtonHelp: String {
         if model.hasActiveModal {
-            return "Close active modal first"
+            return model.l10n.string("app_model.status.close_active_modal_first")
         }
 
         if model.isStreaming {
-            return DefaultKeymap.helpText(for: .stopGeneration) ?? "Stop generation"
+            return DefaultKeymap.helpText(for: .stopGeneration, l10n: model.l10n) ?? model.localizedTitle(for: .stopGeneration)
         }
 
         if !model.canPerformAppAction(.sendPrompt) {
             if model.selectedProject == nil {
-                return "Open a project first"
+                return model.l10n.string("app_model.availability.open_project_first")
             }
 
             if model.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return "Enter a prompt first"
+                return model.l10n.string("app_model.availability.enter_prompt_first")
             }
 
-            return "Wait for the new session to be ready"
+            return model.l10n.string("app_shell.composer.wait_new_session_ready")
         }
 
-        return DefaultKeymap.helpText(for: .sendPrompt) ?? "Send prompt"
+        return DefaultKeymap.helpText(for: .sendPrompt, l10n: model.l10n) ?? model.localizedTitle(for: .sendPrompt)
     }
 }
 
@@ -534,7 +599,7 @@ struct PendingSkillSelectionView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.tertiaryText)
-                .help("Clear selected skills")
+                .help(model.l10n.string("chat.composer.clear_selected_skills"))
             }
         }
         .frame(height: 28)
@@ -543,6 +608,7 @@ struct PendingSkillSelectionView: View {
 }
 
 struct SelectedSkillChip: View {
+    @EnvironmentObject private var model: AppModel
     let skill: AvailableSkill
     let onRemove: () -> Void
 
@@ -559,7 +625,7 @@ struct SelectedSkillChip: View {
                     .frame(width: 16, height: 16)
             }
             .buttonStyle(.plain)
-            .help("Remove selected skill")
+            .help(model.l10n.string("chat.composer.remove_selected_skill"))
         }
         .foregroundStyle(Theme.secondaryText)
         .padding(.leading, 8)
@@ -594,7 +660,7 @@ struct PendingContextAttachmentView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.tertiaryText)
-                .help("Clear context attachments")
+                .help(model.l10n.string("chat.composer.clear_context_attachments"))
             }
         }
         .frame(height: 30)
@@ -603,6 +669,7 @@ struct PendingContextAttachmentView: View {
 }
 
 struct ContextAttachmentChip: View {
+    @EnvironmentObject private var model: AppModel
     let attachment: ContextAttachment
     let onRemove: () -> Void
 
@@ -617,7 +684,7 @@ struct ContextAttachmentChip: View {
                 .truncationMode(.middle)
 
             if !attachment.status.isValid {
-                Text(attachment.status.displayText)
+                Text(attachment.status.displayText(l10n: model.l10n))
                     .uiFont(size: 11, weight: .medium)
                     .foregroundStyle(Theme.red)
                     .lineLimit(1)
@@ -629,7 +696,7 @@ struct ContextAttachmentChip: View {
                     .frame(width: 16, height: 16)
             }
             .buttonStyle(.plain)
-            .help("Remove context attachment")
+            .help(model.l10n.string("chat.composer.remove_context_attachment"))
         }
         .foregroundStyle(attachment.status.isValid ? Theme.secondaryText : Theme.red)
         .padding(.leading, 8)
@@ -650,15 +717,27 @@ struct ContextAttachmentChip: View {
     }
 
     private var helpText: String {
-        attachment.status.isValid ? attachment.relativePath : "\(attachment.relativePath) - \(attachment.status.displayText)"
+        attachment.status.isValid
+            ? attachment.relativePath
+            : model.l10n.string(
+                "chat.context_attachment.help_with_status",
+                attachment.relativePath,
+                attachment.status.displayText(l10n: model.l10n)
+            )
     }
 
     private var accessibilityLabel: String {
-        "\(attachment.kind.label) context attachment \(attachment.relativePath), \(attachment.status.displayText)"
+        model.l10n.string(
+            "chat.context_attachment.accessibility",
+            attachment.kind.localizedLabel(l10n: model.l10n),
+            attachment.relativePath,
+            attachment.status.displayText(l10n: model.l10n)
+        )
     }
 }
 
 struct SkillPickerView: View {
+    @EnvironmentObject private var model: AppModel
     let state: SkillPickerState
     let onHighlight: (AvailableSkill) -> Void
     let onSelect: (AvailableSkill) -> Void
@@ -697,7 +776,7 @@ struct SkillPickerView: View {
                     }
                 }
             } else if state.status == .empty {
-                SkillPickerDisabledRow(text: "No matching skills")
+                SkillPickerDisabledRow(text: model.l10n.string("chat.skill_picker.no_matching_skills"))
             } else if case .unavailable(let message) = state.status {
                 SkillPickerDisabledRow(text: message)
             }
@@ -779,6 +858,7 @@ private struct SkillPickerDisabledRow: View {
 }
 
 struct MentionPickerView: View {
+    @EnvironmentObject private var model: AppModel
     let state: MentionPickerState
     let onHover: (MentionSearchResult.ID) -> Void
     let onSelect: (MentionSearchResult.ID) -> Void
@@ -835,11 +915,13 @@ struct MentionPickerView: View {
         case .ready:
             return ""
         case .indexing:
-            return "Indexing project files..."
+            return model.l10n.string("chat.mention_picker.indexing")
         case .noMatches:
-            return state.query.searchText.isEmpty ? "No project files available" : "No matching files"
+            return state.query.searchText.isEmpty
+                ? model.l10n.string("chat.mention_picker.no_project_files")
+                : model.l10n.string("chat.mention_picker.no_matching_files")
         case .unavailable:
-            return "No project files available"
+            return model.l10n.string("chat.mention_picker.no_project_files")
         }
     }
 }
@@ -897,6 +979,7 @@ private struct MentionPickerStatusRow: View {
 }
 
 struct MessageBubbleView: View {
+    @EnvironmentObject private var model: AppModel
     let message: ChatMessage
 
     var body: some View {
@@ -946,15 +1029,15 @@ struct MessageBubbleView: View {
 
     private var defaultTitle: String {
         switch message.role {
-        case .user: return "You"
+        case .user: return model.l10n.string("chat.message.title.you")
         case .assistant: return "π"
-        case .system: return "System"
-        case .tool: return "Tool"
+        case .system: return model.l10n.string("chat.message.title.system")
+        case .tool: return model.l10n.string("chat.message.title.tool")
         }
     }
 
     private var messageText: String {
-        message.text.isEmpty ? "Working..." : message.text
+        message.text.isEmpty ? model.l10n.string("chat.message.working") : message.text
     }
 
     private var visibleBlocks: [MessageContentBlock] {
@@ -963,6 +1046,7 @@ struct MessageBubbleView: View {
 }
 
 private struct MessageContentBlockView: View {
+    @EnvironmentObject private var model: AppModel
     let block: MessageContentBlock
 
     var body: some View {
@@ -978,7 +1062,7 @@ private struct MessageContentBlockView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 6)
             } label: {
-                Label("Thinking", systemImage: "brain.head.profile")
+                Label(model.l10n.string("chat.message.thinking"), systemImage: "brain.head.profile")
                     .uiFont(size: 12, weight: .medium)
                     .foregroundStyle(Theme.tertiaryText)
             }
@@ -998,6 +1082,7 @@ private struct MessageContentBlockView: View {
 }
 
 private struct InlineToolCallView: View {
+    @EnvironmentObject private var model: AppModel
     @State private var isExpanded = false
     let call: ToolCallPresentation
 
@@ -1028,8 +1113,8 @@ private struct InlineToolCallView: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .help(isExpanded ? "Collapse tool message" : "Expand tool message")
-                        .accessibilityLabel(isExpanded ? "Collapse tool message" : "Expand tool message")
+                        .help(toolMessageToggleLabel)
+                        .accessibilityLabel(toolMessageToggleLabel)
                     }
                 }
 
@@ -1048,9 +1133,16 @@ private struct InlineToolCallView: View {
         .background(Theme.elevatedBackground.opacity(0.7))
         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
+
+    private var toolMessageToggleLabel: String {
+        isExpanded
+            ? model.l10n.string("chat.tool_message.collapse")
+            : model.l10n.string("chat.tool_message.expand")
+    }
 }
 
 private struct InlineToolResultView: View {
+    @EnvironmentObject private var model: AppModel
     let result: ToolResultPresentation
 
     var body: some View {
@@ -1062,7 +1154,10 @@ private struct InlineToolResultView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 6)
         } label: {
-            Label(result.isError ? "Tool failed" : "Tool output", systemImage: result.isError ? "xmark.circle" : "terminal")
+            Label(
+                result.isError ? model.l10n.string("chat.tool_result.failed") : model.l10n.string("chat.tool_result.output"),
+                systemImage: result.isError ? "xmark.circle" : "terminal"
+            )
                 .uiFont(size: 12, weight: .medium)
                 .foregroundStyle(result.isError ? Theme.red : Theme.secondaryText)
         }

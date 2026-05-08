@@ -58,6 +58,10 @@ Build a release bundle:
 open ".build/Pi Agent.app"
 ```
 
+The build script packages the SwiftPM-generated localization resource bundle
+into `Contents/Resources` and verifies that English and Brazilian Portuguese
+`Localizable.strings` files are present before printing the app path.
+
 After launch, click **Open project**, choose a repository folder, authenticate
 with a provider if needed, then send a prompt.
 

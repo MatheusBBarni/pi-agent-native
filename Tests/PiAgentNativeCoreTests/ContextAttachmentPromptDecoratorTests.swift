@@ -24,6 +24,31 @@ final class ContextAttachmentPromptDecoratorTests: XCTestCase {
         """)
     }
 
+    func testLocalizedAttachmentDisplayDoesNotChangePromptPayloadLabels() {
+        let project = ProjectItem(id: "project-a", name: "Project", path: "/tmp/project")
+        let l10n = L10n(language: .portugueseBrazil)
+
+        XCTAssertEqual(ContextAttachmentKind.file.localizedLabel(l10n: l10n), "arquivo")
+        XCTAssertEqual(ContextAttachmentStatus.wrongKind(actualKind: .folder).displayText(l10n: l10n), "Agora é pasta")
+
+        let prompt = ContextAttachmentPromptDecorator.decoratedPrompt(
+            userPrompt: "Review.",
+            attachments: [
+                attachment("Sources/App.swift", kind: .file, project: project, status: .valid(resolvedURL: URL(fileURLWithPath: "/tmp/project/Sources/App.swift"))),
+                attachment("Sources/Features/", kind: .folder, project: project, status: .valid(resolvedURL: URL(fileURLWithPath: "/tmp/project/Sources/Features", isDirectory: true)))
+            ]
+        )
+
+        XCTAssertEqual(prompt, """
+        <context-attachments>
+        - file: Sources/App.swift
+        - folder: Sources/Features/
+        </context-attachments>
+
+        Review.
+        """)
+    }
+
     func testOmitsDecorationForEmptyOrInvalidAttachments() {
         let project = ProjectItem(id: "project-a", name: "Project", path: "/tmp/project")
 

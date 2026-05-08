@@ -48,6 +48,19 @@ public enum KeybindingHelpGroup: String, CaseIterable {
     case chat = "Chat"
     case composer = "Composer"
     case navigation = "Navigation"
+
+    func localizedTitle(l10n: L10n) -> String {
+        switch self {
+        case .shell:
+            return l10n.string("keybinding.help_group.shell")
+        case .chat:
+            return l10n.string("keybinding.help_group.chat")
+        case .composer:
+            return l10n.string("keybinding.help_group.composer")
+        case .navigation:
+            return l10n.string("keybinding.help_group.navigation")
+        }
+    }
 }
 
 public enum KeybindingKey: Equatable {
@@ -119,6 +132,10 @@ public struct KeybindingDefinition: Identifiable, Equatable {
         return (modifierLabels + [key.displayName]).joined(separator: "-")
     }
 
+    public func localizedTitle(l10n: L10n) -> String {
+        actionID.localizedTitle(l10n: l10n)
+    }
+
     public var eventModifierFlags: NSEvent.ModifierFlags {
         var flags: NSEvent.ModifierFlags = []
         if modifiers.contains(.command) { flags.insert(.command) }
@@ -177,9 +194,15 @@ public enum DefaultKeymap {
         firstDefinition(for: actionID)?.title
     }
 
-    public static func helpText(for actionID: AppActionID, title: String? = nil) -> String? {
+    public static func title(for actionID: AppActionID, l10n: L10n) -> String? {
+        guard firstDefinition(for: actionID) != nil else { return nil }
+        return actionID.localizedTitle(l10n: l10n)
+    }
+
+    public static func helpText(for actionID: AppActionID, title: String? = nil, l10n: L10n? = nil) -> String? {
         guard let definition = firstDefinition(for: actionID) else { return nil }
-        return "\(title ?? definition.title) - \(definition.displayLabel)"
+        let displayTitle = title ?? l10n.map { definition.localizedTitle(l10n: $0) } ?? definition.title
+        return "\(displayTitle) - \(definition.displayLabel)"
     }
 
     public static func conflicts(in definitions: [KeybindingDefinition] = definitions) -> [KeybindingConflict] {
@@ -205,6 +228,47 @@ public enum DefaultKeymap {
         let scopes = Set([lhs.scope, rhs.scope])
         return actionIDs == Set([.closeActiveModal, .stopGeneration]) &&
             scopes == Set([.focused, .chat])
+    }
+}
+
+extension AppActionID {
+    func localizedTitle(l10n: L10n) -> String {
+        l10n.string(localizationKey)
+    }
+
+    private var localizationKey: String {
+        switch self {
+        case .newChat:
+            return "app_action.new_chat.title"
+        case .openProject:
+            return "app_action.open_project.title"
+        case .openCommandPalette:
+            return "app_action.open_command_palette.title"
+        case .focusComposer:
+            return "app_action.focus_composer.title"
+        case .refreshState:
+            return "app_action.refresh_state.title"
+        case .openSettings:
+            return "app_action.open_settings.title"
+        case .openProcessLog:
+            return "app_action.open_process_log.title"
+        case .openKeybindingHelp:
+            return "app_action.open_keybinding_help.title"
+        case .toggleSidebar:
+            return "app_action.toggle_sidebar.title"
+        case .toggleInspector:
+            return "app_action.toggle_inspector.title"
+        case .sendPrompt:
+            return "app_action.send_prompt.title"
+        case .stopGeneration:
+            return "app_action.stop_generation.title"
+        case .insertComposerNewline:
+            return "app_action.insert_composer_newline.title"
+        case .cycleThinkingLevel:
+            return "app_action.cycle_thinking_level.title"
+        case .closeActiveModal:
+            return "app_action.close_active_modal.title"
+        }
     }
 }
 

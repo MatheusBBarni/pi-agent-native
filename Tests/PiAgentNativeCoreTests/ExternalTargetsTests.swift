@@ -121,6 +121,7 @@ final class ExternalTargetsTests: XCTestCase {
         }
 
         let model = AppModel()
+        model.appLanguage = .english
         let project = ProjectItem(name: "My Project", path: "/tmp/My Project")
         let session = StoredSession(
             id: "session-1",

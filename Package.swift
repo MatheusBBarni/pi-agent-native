@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "PiAgentNative",
+    defaultLocalization: "en",
     platforms: [
         .macOS(.v14)
     ],
@@ -19,7 +20,10 @@ let package = Package(
             dependencies: [
                 .product(name: "MarkdownUI", package: "swift-markdown-ui")
             ],
-            path: "Sources/PiAgentNative"
+            path: "Sources/PiAgentNative",
+            resources: [
+                .process("Resources")
+            ]
         ),
         .executableTarget(
             name: "PiAgentNativeExecutable",

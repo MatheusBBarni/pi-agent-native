@@ -23,17 +23,21 @@ enum ModelAccessState: Equatable {
     }
 
     var unavailableMessage: String {
+        unavailableMessage(l10n: L10n(language: .english))
+    }
+
+    func unavailableMessage(l10n: L10n) -> String {
         switch self {
         case .unknown:
-            return "Model access has not been checked yet. Refresh state or log in."
+            return l10n.string("auth.model_access.unavailable.unknown")
         case .refreshing:
-            return "Model access is refreshing. Try again when refresh completes."
+            return l10n.string("auth.model_access.unavailable.refreshing")
         case .unavailable(let reason):
-            return reason ?? "No model access is available."
+            return reason ?? l10n.string("auth.model_access.unavailable.no_access")
         case .available:
-            return "Model access is available."
+            return l10n.string("auth.model_access.available")
         case .failed(let message):
-            return "Could not refresh model access: \(message)"
+            return l10n.string("auth.model_access.unavailable.failed", message)
         }
     }
 }
@@ -52,17 +56,21 @@ enum SubscriptionAccessState: Equatable {
     }
 
     var unavailableMessage: String {
+        unavailableMessage(l10n: L10n(language: .english))
+    }
+
+    func unavailableMessage(l10n: L10n) -> String {
         switch self {
         case .unknown:
-            return "Subscription access has not been checked yet."
+            return l10n.string("auth.subscription_access.unavailable.unknown")
         case .refreshing:
-            return "Subscription access is refreshing."
+            return l10n.string("auth.subscription_access.unavailable.refreshing")
         case .inactive(let reason):
-            return reason ?? "No active subscription found."
+            return reason ?? l10n.string("auth.subscription_access.unavailable.no_active")
         case .active:
-            return "Subscription access is active."
+            return l10n.string("auth.subscription_access.active")
         case .failed(let message):
-            return "Could not refresh subscription access: \(message)"
+            return l10n.string("auth.subscription_access.unavailable.failed", message)
         }
     }
 }
@@ -84,43 +92,51 @@ struct AuthAccessState: Equatable {
     }
 
     var modelPickerEmptyTitle: String {
+        modelPickerEmptyTitle(l10n: L10n(language: .english))
+    }
+
+    func modelPickerEmptyTitle(l10n: L10n) -> String {
         switch modelAccess {
         case .unknown:
             switch authentication {
             case .unauthenticated:
-                return "Not logged in"
+                return l10n.string("auth.model_picker.empty.title.not_logged_in")
             default:
-                return "Model access not checked"
+                return l10n.string("auth.model_picker.empty.title.not_checked")
             }
         case .refreshing:
-            return "Refreshing model access"
+            return l10n.string("auth.model_picker.empty.title.refreshing")
         case .unavailable:
-            return "No model access"
+            return l10n.string("auth.model_picker.empty.title.no_access")
         case .available:
-            return "No models loaded"
+            return l10n.string("auth.model_picker.empty.title.no_models")
         case .failed:
-            return "Could not refresh model access"
+            return l10n.string("auth.model_picker.empty.title.refresh_failed")
         }
     }
 
     var modelPickerEmptyDetail: String {
+        modelPickerEmptyDetail(l10n: L10n(language: .english))
+    }
+
+    func modelPickerEmptyDetail(l10n: L10n) -> String {
         switch modelAccess {
         case .unknown:
-            return "Use Login to add an API key or subscription, then refresh."
+            return l10n.string("auth.model_picker.empty.detail.unknown")
         case .refreshing:
-            return "The app is checking the current credentials with pi."
+            return l10n.string("auth.model_picker.empty.detail.refreshing")
         case .unavailable(let reason):
-            return reason ?? "No authenticated models were returned for the current credentials."
+            return reason ?? l10n.string("auth.model_picker.empty.detail.no_authenticated_models")
         case .available:
             switch subscriptionAccess {
             case .active:
-                return "Model access and subscription access are active, but no models were returned to display."
+                return l10n.string("auth.model_picker.empty.detail.active_no_models")
             case .inactive(let reason):
-                return reason ?? "Model access is available without an active subscription."
+                return reason ?? l10n.string("auth.model_picker.empty.detail.no_active_subscription")
             case .unknown, .refreshing:
-                return "Model access is available while subscription access is still being checked."
+                return l10n.string("auth.model_picker.empty.detail.subscription_checking")
             case .failed(let message):
-                return "Model access is available, but subscription refresh failed: \(message)"
+                return l10n.string("auth.model_picker.empty.detail.subscription_failed", message)
             }
         case .failed(let message):
             return message
@@ -128,11 +144,19 @@ struct AuthAccessState: Equatable {
     }
 
     var sendPromptUnavailableMessage: String? {
-        modelAccess.isAvailable ? nil : modelAccess.unavailableMessage
+        sendPromptUnavailableMessage(l10n: L10n(language: .english))
+    }
+
+    func sendPromptUnavailableMessage(l10n: L10n) -> String? {
+        modelAccess.isAvailable ? nil : modelAccess.unavailableMessage(l10n: l10n)
     }
 
     var subscriptionGateUnavailableMessage: String? {
-        subscriptionAccess.isActive ? nil : subscriptionAccess.unavailableMessage
+        subscriptionGateUnavailableMessage(l10n: L10n(language: .english))
+    }
+
+    func subscriptionGateUnavailableMessage(l10n: L10n) -> String? {
+        subscriptionAccess.isActive ? nil : subscriptionAccess.unavailableMessage(l10n: l10n)
     }
 }
 
@@ -280,6 +304,7 @@ struct AuthAccessRefreshTracker: Equatable {
     mutating func handle(
         response: PiRPCResponse,
         state: inout AuthAccessState,
+        l10n: L10n = L10n(language: .english),
         now: Date = Date()
     ) -> AccessRefreshResponseEffect {
         guard let responseID = response.id,
@@ -332,6 +357,7 @@ struct AuthAccessRefreshTracker: Equatable {
             models: models,
             credentialSnapshot: current.credentialSnapshot,
             state: &state,
+            l10n: l10n,
             now: now
         )
         return .completed(models: models)
@@ -365,6 +391,7 @@ struct AuthAccessRefreshTracker: Equatable {
         models: [PiModel],
         credentialSnapshot: AuthCredentialSnapshot,
         state: inout AuthAccessState,
+        l10n: L10n,
         now: Date
     ) {
         let distinctModelProviders = Set(models.map(\.provider))
@@ -377,8 +404,8 @@ struct AuthAccessRefreshTracker: Equatable {
         }
 
         if models.isEmpty {
-            state.modelAccess = .unavailable(reason: "No authenticated models found.")
-            state.subscriptionAccess = .inactive(reason: "No active subscription found.")
+            state.modelAccess = .unavailable(reason: l10n.string("auth.model_access.reason.no_authenticated_models"))
+            state.subscriptionAccess = .inactive(reason: l10n.string("auth.subscription_access.reason.no_active"))
         } else {
             state.modelAccess = .available(providerID: singleModelProvider)
             let subscriptionProviders = distinctModelProviders
@@ -386,7 +413,7 @@ struct AuthAccessRefreshTracker: Equatable {
 
             if subscriptionProviders.isEmpty {
                 state.subscriptionAccess = .inactive(
-                    reason: "Model access is available, but no subscription-backed credentials were found."
+                    reason: l10n.string("auth.subscription_access.reason.no_subscription_credentials")
                 )
             } else {
                 state.subscriptionAccess = .active(

@@ -4,8 +4,8 @@ import XCTest
 
 final class InspectorPaneToggleTests: XCTestCase {
     func testInspectorTogglePresentationDescribesNextActionAndVisibleState() {
-        let visible = InspectorToggleButtonPresentation(isInspectorVisible: true, isEnabled: true)
-        let hidden = InspectorToggleButtonPresentation(isInspectorVisible: false, isEnabled: true)
+        let visible = InspectorToggleButtonPresentation(isInspectorVisible: true, isEnabled: true, language: .english)
+        let hidden = InspectorToggleButtonPresentation(isInspectorVisible: false, isEnabled: true, language: .english)
 
         XCTAssertEqual(visible.iconSystemName, "sidebar.right")
         XCTAssertEqual(visible.helpText, "Toggle inspector - Command-Option-I")
@@ -19,6 +19,25 @@ final class InspectorPaneToggleTests: XCTestCase {
         XCTAssertEqual(hidden.accessibilityLabel, "Show inspector")
         XCTAssertEqual(hidden.accessibilityValue, "Inspector hidden")
         XCTAssertEqual(hidden.accessibilityHint, "Toggles the inspector pane")
+        XCTAssertTrue(hidden.isHighlighted)
+    }
+
+    func testInspectorTogglePresentationLocalizesChromeWithoutChangingStateSignal() {
+        let visible = InspectorToggleButtonPresentation(isInspectorVisible: true, isEnabled: true, language: .portugueseBrazil)
+        let hidden = InspectorToggleButtonPresentation(isInspectorVisible: false, isEnabled: true, language: .portugueseBrazil)
+
+        XCTAssertEqual(visible.iconSystemName, "sidebar.right")
+        XCTAssertEqual(visible.helpText, "Alternar inspetor - Command-Option-I")
+        XCTAssertEqual(visible.accessibilityLabel, "Ocultar inspetor")
+        XCTAssertEqual(visible.accessibilityValue, "Inspetor visível")
+        XCTAssertEqual(visible.accessibilityHint, "Alterna o painel do inspetor")
+        XCTAssertFalse(visible.isHighlighted)
+
+        XCTAssertEqual(hidden.iconSystemName, "sidebar.right")
+        XCTAssertEqual(hidden.helpText, "Alternar inspetor - Command-Option-I")
+        XCTAssertEqual(hidden.accessibilityLabel, "Mostrar inspetor")
+        XCTAssertEqual(hidden.accessibilityValue, "Inspetor oculto")
+        XCTAssertEqual(hidden.accessibilityHint, "Alterna o painel do inspetor")
         XCTAssertTrue(hidden.isHighlighted)
     }
 
