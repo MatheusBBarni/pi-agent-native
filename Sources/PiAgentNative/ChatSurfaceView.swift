@@ -9,7 +9,7 @@ struct ChatSurfaceView: View {
         VStack(spacing: 0) {
             ChatHeaderView()
                 .padding(.horizontal, 20)
-                .frame(height: 56)
+                .frame(height: 44)
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2, perform: WindowActions.zoomKeyWindow)
 
@@ -68,7 +68,7 @@ struct ChatHeaderView: View {
         HStack(spacing: 12) {
             if !model.isSidebarVisible {
                 SidebarToggleButtonView()
-                    .padding(.leading, 46)
+                    .padding(.leading, 62)
             }
 
             Text(model.sessionTitle)
@@ -95,21 +95,15 @@ private struct SidebarToggleButtonView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
-        Button {
+        HeaderIconButton(
+            systemImage: "sidebar.left",
+            title: "Show sidebar",
+            actionID: .toggleSidebar,
+            isEnabled: model.canPerformAppAction(.toggleSidebar),
+            disabledHelp: "Close active modal first"
+        ) {
             model.performAppAction(.toggleSidebar)
-        } label: {
-            Image(systemName: "sidebar.left")
-                .uiFont(size: 15, weight: .medium)
-                .foregroundStyle(Theme.accent)
-                .frame(width: 30, height: 30)
-                .background(Theme.elevatedBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .disabled(!model.canPerformAppAction(.toggleSidebar))
-        .help(DefaultKeymap.helpText(for: .toggleSidebar) ?? "Toggle sidebar")
-        .accessibilityLabel(Text("Show sidebar"))
         .accessibilityValue(Text("Sidebar hidden"))
         .accessibilityHint(Text("Shows the sidebar"))
     }

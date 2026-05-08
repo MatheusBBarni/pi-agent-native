@@ -91,6 +91,55 @@ final class QueuedWorkDisplayStateTests: XCTestCase {
         XCTAssertEqual(model.queuedWorkDisplayState, .empty)
     }
 
+    func testNewSessionIgnoresLateQueueUpdateUntilStateRefresh() {
+        let project = ProjectItem(id: "project-1", name: "Repo", path: "/tmp/repo")
+        let model = AppModel()
+        model.projects = [project]
+        model.selectedProjectID = project.id
+        model.applyQueuedWorkUpdate(PiRPCQueueUpdate(payload: [
+            "steering": ["Old session detail"],
+            "followUp": []
+        ]))
+
+        model.newSession()
+        model.applyQueuedWorkUpdate(PiRPCQueueUpdate(payload: [
+            "steering": ["Should not reappear"],
+            "followUp": []
+        ]))
+
+        XCTAssertEqual(model.pendingMessageCount, 0)
+        XCTAssertEqual(model.queuedWorkDisplayState, .empty)
+    }
+
+    func testSwitchSessionIgnoresLateQueueUpdateUntilStateRefresh() {
+        let project = ProjectItem(id: "project-1", name: "Repo", path: "/tmp/repo")
+        let session = StoredSession(
+            id: "session-2",
+            projectPath: project.path,
+            projectName: project.name,
+            title: "Target",
+            status: "Ready",
+            sessionFile: "/tmp/repo/session-2.json",
+            updatedAt: Date()
+        )
+        let model = AppModel()
+        model.projects = [project]
+        model.selectedProjectID = project.id
+        model.applyQueuedWorkUpdate(PiRPCQueueUpdate(payload: [
+            "steering": ["Old session detail"],
+            "followUp": []
+        ]))
+
+        model.switchSession(session)
+        model.applyQueuedWorkUpdate(PiRPCQueueUpdate(payload: [
+            "steering": ["Should not reappear"],
+            "followUp": []
+        ]))
+
+        XCTAssertEqual(model.pendingMessageCount, 0)
+        XCTAssertEqual(model.queuedWorkDisplayState, .empty)
+    }
+
     func testStopClearsQueueState() {
         let model = AppModel()
         model.applyQueuedWorkUpdate(PiRPCQueueUpdate(payload: [
