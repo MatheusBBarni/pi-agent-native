@@ -6,6 +6,7 @@ enum PiRPCEventReducerEffect: Equatable {
     case setQueuedWork(PiRPCQueueUpdate)
     case appendLog(title: String, detail: String)
     case refreshState
+    case refreshRepositoryChanges
     case extensionUIRequest(PiExtensionUIRequest)
 }
 
@@ -91,7 +92,7 @@ struct PiRPCEventReducer {
                     isError: event.isError
                 ))
             }
-            return []
+            return [.refreshRepositoryChanges]
 
         case .queueUpdate(let event):
             return [.setQueuedWork(event)]

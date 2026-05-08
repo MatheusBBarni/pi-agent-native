@@ -60,6 +60,15 @@ public struct AppShellView: View {
                 }
             }
 
+            if model.isShowingChangeReview {
+                ModalBackdrop {
+                    model.performAppAction(.closeActiveModal)
+                } content: {
+                    ChangeReviewSheetView()
+                        .environmentObject(model)
+                }
+            }
+
             if model.isShowingSettings {
                 ModalBackdrop {
                     model.performAppAction(.closeActiveModal)

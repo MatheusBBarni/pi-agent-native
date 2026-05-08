@@ -21,9 +21,9 @@ $build-ios-apps:swiftui-ui-patterns
 
 Stage agent: engineer
 
-You are working on GitHub issue #25: Add structured context attachments for File Mentions.
+You are working on GitHub issue #24: Add native diff and patch review surface.
 
-Repository issue URL: https://github.com/MatheusBBarni/pi-agent-native/issues/25
+Repository issue URL: https://github.com/MatheusBBarni/pi-agent-native/issues/24
 Current project status: In progress
 Attempt: 
 

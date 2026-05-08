@@ -82,7 +82,7 @@ final class PiRPCEventReducerTests: XCTestCase {
             "toolCallId": "tool-1",
             "partialResult": ["content": [["text": "running"]]]
         ])), conversation: conversation, tools: tools)
-        _ = reducer.reduce(.toolExecutionEnd(PiRPCToolExecution(payload: [
+        let effects = reducer.reduce(.toolExecutionEnd(PiRPCToolExecution(payload: [
             "toolCallId": "tool-1",
             "result": ["content": [["text": "passed"]]],
             "isError": false
@@ -97,6 +97,7 @@ final class PiRPCEventReducerTests: XCTestCase {
             text: "passed",
             isError: false
         ))))
+        XCTAssertEqual(effects, [.refreshRepositoryChanges])
     }
 
     func testEmitsQueueAndExtensionUIEffects() {
