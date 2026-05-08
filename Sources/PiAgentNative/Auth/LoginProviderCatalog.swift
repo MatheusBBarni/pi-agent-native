@@ -36,4 +36,8 @@ enum LoginProviderCatalog {
         LoginProvider(id: "xiaomi-token-plan-ams", name: "Xiaomi MiMo Token Plan (Amsterdam)"),
         LoginProvider(id: "xiaomi-token-plan-sgp", name: "Xiaomi MiMo Token Plan (Singapore)")
     ]
+
+    static func displayName(forID providerID: String) -> String {
+        (subscriptionProviders + apiKeyProviders).first { $0.id == providerID }?.name ?? providerID
+    }
 }

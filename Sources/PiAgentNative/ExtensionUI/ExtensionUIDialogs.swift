@@ -20,7 +20,8 @@ struct ExtensionUIDialogView: View {
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
-                .help("Cancel")
+                .help(localized("extension_ui.cancel"))
+                .accessibilityLabel(localized("extension_ui.cancel"))
             }
 
             if !request.message.isEmpty {
@@ -34,7 +35,7 @@ struct ExtensionUIDialogView: View {
 
             HStack {
                 Spacer()
-                Button("Cancel") {
+                Button(localized("extension_ui.cancel")) {
                     model.cancelExtensionUIRequest()
                 }
                 Button(primaryTitle) {
@@ -56,7 +57,7 @@ struct ExtensionUIDialogView: View {
     private var requestControl: some View {
         switch request.method {
         case .select:
-            Picker("Selection", selection: $selectedValue) {
+            Picker(localized("extension_ui.selection"), selection: $selectedValue) {
                 ForEach(request.options) { option in
                     Text(option.label).tag(option.value)
                 }
@@ -65,7 +66,7 @@ struct ExtensionUIDialogView: View {
         case .confirm:
             EmptyView()
         case .input:
-            TextField("", text: $textValue)
+            TextField(localized("extension_ui.input_label"), text: $textValue)
                 .textFieldStyle(.roundedBorder)
         case .editor:
             TextEditor(text: $textValue)
@@ -74,6 +75,7 @@ struct ExtensionUIDialogView: View {
                 .scrollContentBackground(.hidden)
                 .background(Theme.elevatedBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .accessibilityLabel(localized("extension_ui.editor_label"))
         case .notify, .setStatus, .setWidget, .setTitle, .setEditorText, .unknown:
             if !request.defaultValue.isEmpty {
                 Text(request.defaultValue)
@@ -83,6 +85,7 @@ struct ExtensionUIDialogView: View {
                     .padding(10)
                     .background(Theme.elevatedBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .accessibilityLabel(localized("extension_ui.default_value_label"))
             }
         }
     }
@@ -90,9 +93,9 @@ struct ExtensionUIDialogView: View {
     private var primaryTitle: String {
         switch request.method {
         case .confirm:
-            return "Confirm"
+            return localized("extension_ui.confirm")
         default:
-            return "Submit"
+            return localized("extension_ui.submit")
         }
     }
 
@@ -107,5 +110,9 @@ struct ExtensionUIDialogView: View {
         case .notify, .setStatus, .setWidget, .setTitle, .setEditorText, .unknown:
             return request.defaultValue
         }
+    }
+
+    private func localized(_ key: String) -> String {
+        model.l10n.string(key)
     }
 }

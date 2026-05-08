@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Localize Inspector, Process Log, and Change Review"
 type: frontend
 complexity: high
@@ -30,12 +30,12 @@ Localize app-owned labels, statuses, and pluralized counts in the inspector, pro
 </requirements>
 
 ## Subtasks
-- [ ] 8.1 Localize inspector section labels and status text.
-- [ ] 8.2 Localize process log sheet title, close button, and empty state.
-- [ ] 8.3 Localize change review sheet chrome and empty states.
-- [ ] 8.4 Add pluralized changed-file and queued-work copy.
-- [ ] 8.5 Preserve technical values as interpolation or raw display.
-- [ ] 8.6 Add tests for pluralization and verbatim diff/path/tool output.
+- [x] 8.1 Localize inspector section labels and status text.
+- [x] 8.2 Localize process log sheet title, close button, and empty state.
+- [x] 8.3 Localize change review sheet chrome and empty states.
+- [x] 8.4 Add pluralized changed-file and queued-work copy.
+- [x] 8.5 Preserve technical values as interpolation or raw display.
+- [x] 8.6 Add tests for pluralization and verbatim diff/path/tool output.
 
 ## Implementation Details
 Prefer localizing display formatting close to the UI or assignment site when lower-risk than pulling localization into parser/service layers.
@@ -67,13 +67,13 @@ Prefer localizing display formatting close to the UI or assignment site when low
 
 ## Tests
 - Unit tests:
-  - [ ] Changed-file count formats correctly for 0, 1, and many in English.
-  - [ ] Changed-file count formats correctly for 0, 1, and many in pt-BR.
-  - [ ] Branch name and path interpolation remain unchanged.
-  - [ ] Diff line text and hunk metadata remain unchanged.
-  - [ ] Tool/process output remains unchanged.
+  - [x] Changed-file count formats correctly for 0, 1, and many in English.
+  - [x] Changed-file count formats correctly for 0, 1, and many in pt-BR.
+  - [x] Branch name and path interpolation remain unchanged.
+  - [x] Diff line text and hunk metadata remain unchanged.
+  - [x] Tool/process output remains unchanged.
 - Integration tests:
-  - [ ] Change review displays localized chrome around unchanged diff data.
+  - [x] Change review displays localized chrome around unchanged diff data.
 - Test coverage target: >=80%
 - All tests must pass
 

@@ -100,6 +100,50 @@ final class PiRPCEventReducerTests: XCTestCase {
         XCTAssertEqual(effects, [.refreshRepositoryChanges])
     }
 
+    func testLocalizedChatChromeDoesNotMutateAssistantOrToolPayloads() {
+        let conversation = ConversationStore()
+        let tools = ToolActivityStore()
+        let reducer = PiRPCEventReducer()
+        let assistantText = "Raw assistant output: /tmp/Projeto %@ não traduzir"
+        let command = "printf 'Olá /tmp/raw path && $VALUE'"
+        let toolOutput = "stdout: caminho=/tmp/Projeto Bruto\nstatus=%@"
+
+        XCTAssertEqual(L10n(language: .portugueseBrazil).string("chat.tool_result.output"), "Saída da ferramenta")
+
+        _ = reducer.reduce(.agentStart([:]), conversation: conversation, tools: tools)
+        _ = reducer.reduce(.messageUpdate(PiRPCMessageUpdate(deltaPayload: [
+            "type": "text_delta",
+            "delta": assistantText
+        ])), conversation: conversation, tools: tools)
+        _ = reducer.reduce(.toolExecutionStart(PiRPCToolExecution(payload: [
+            "toolCallId": "tool-raw",
+            "toolName": "bash/raw-tool",
+            "args": ["command": command]
+        ])), conversation: conversation, tools: tools)
+        _ = reducer.reduce(.toolExecutionEnd(PiRPCToolExecution(payload: [
+            "toolCallId": "tool-raw",
+            "result": ["content": [["text": toolOutput]]],
+            "isError": false
+        ])), conversation: conversation, tools: tools)
+
+        XCTAssertEqual(conversation.messages[0].text, assistantText)
+        XCTAssertTrue(conversation.messages[0].contentBlocks.contains(.text(assistantText)))
+        XCTAssertTrue(conversation.messages[0].contentBlocks.contains(.toolCall(ToolCallPresentation(
+            toolCallId: "tool-raw",
+            name: "bash/raw-tool",
+            argumentsSummary: command,
+            status: .running
+        ))))
+        XCTAssertTrue(conversation.messages[0].contentBlocks.contains(.toolResult(ToolResultPresentation(
+            toolCallId: "tool-raw",
+            text: toolOutput,
+            isError: false
+        ))))
+        XCTAssertEqual(tools.tools[0].name, "bash/raw-tool")
+        XCTAssertEqual(tools.tools[0].summary, command)
+        XCTAssertEqual(tools.tools[0].output, toolOutput)
+    }
+
     func testEmitsQueueAndExtensionUIEffects() {
         let conversation = ConversationStore()
         let tools = ToolActivityStore()
@@ -123,6 +167,100 @@ final class PiRPCEventReducerTests: XCTestCase {
         let extensionEffects = reducer.reduce(.extensionUIRequest(request), conversation: conversation, tools: tools)
 
         XCTAssertEqual(extensionEffects, [.extensionUIRequest(request)])
+    }
+
+    func testExtensionUIRequestContentRemainsVerbatimWithPortugueseControls() {
+        let l10n = L10n(language: .portugueseBrazil)
+        let request = PiExtensionUIRequest(payload: [
+            "id": "request-raw",
+            "method": "select",
+            "params": [
+                "title": "Pick raw option %@ /tmp/Projeto",
+                "message": "Do not translate this RPC message: $VALUE",
+                "default": "raw-default-%@",
+                "options": [
+                    ["label": "First raw option %@ /tmp/path", "value": "first-raw-value"],
+                    "Literal raw option %@"
+                ]
+            ]
+        ])
+
+        XCTAssertEqual(l10n.string("extension_ui.cancel"), "Cancelar")
+        XCTAssertEqual(l10n.string("extension_ui.selection"), "Seleção")
+        XCTAssertEqual(request.title, "Pick raw option %@ /tmp/Projeto")
+        XCTAssertEqual(request.message, "Do not translate this RPC message: $VALUE")
+        XCTAssertEqual(request.defaultValue, "raw-default-%@")
+        XCTAssertEqual(request.options, [
+            PiExtensionUIRequest.Option(
+                id: "first-raw-value",
+                label: "First raw option %@ /tmp/path",
+                value: "first-raw-value"
+            ),
+            PiExtensionUIRequest.Option(
+                id: "Literal raw option %@",
+                label: "Literal raw option %@",
+                value: "Literal raw option %@"
+            )
+        ])
+    }
+
+    func testExtensionUICancelResponsePayloadRemainsProtocolCompatible() throws {
+        let router = ExtensionUIRouter()
+        let request = PiExtensionUIRequest(payload: [
+            "id": "cancel-request",
+            "method": "input",
+            "params": [
+                "title": "Raw input title",
+                "message": "Raw input message"
+            ]
+        ])
+
+        guard case .pendingDialog = router.route(request) else {
+            return XCTFail("Expected input request to open a dialog")
+        }
+
+        let command = try XCTUnwrap(router.rejectActiveRequest())
+
+        XCTAssertNil(router.activeRequest)
+        XCTAssertEqual(command.type, "extension_ui_response")
+        XCTAssertEqual(command.payload["requestId"] as? String, "cancel-request")
+        XCTAssertEqual(command.payload["error"] as? String, "cancelled")
+        XCTAssertNil(command.payload["result"])
+    }
+
+    func testExtensionUIRoundTripPreservesRequestPayloadAndSubmittedResult() throws {
+        let router = ExtensionUIRouter()
+        let request = PiExtensionUIRequest(payload: [
+            "id": "submit-request",
+            "method": "select",
+            "params": [
+                "title": "Raw select title %@",
+                "message": "Raw select message /tmp/Project",
+                "default": "raw-default",
+                "options": [
+                    ["label": "Raw label A", "value": "raw-value-a"],
+                    ["label": "Raw label B", "value": "raw-value-b"]
+                ]
+            ]
+        ])
+
+        guard case .pendingDialog = router.route(request) else {
+            return XCTFail("Expected select request to open a dialog")
+        }
+
+        XCTAssertEqual(router.activeRequest, request)
+        XCTAssertEqual(router.activeRequest?.title, "Raw select title %@")
+        XCTAssertEqual(router.activeRequest?.message, "Raw select message /tmp/Project")
+        XCTAssertEqual(router.activeRequest?.defaultValue, "raw-default")
+        XCTAssertEqual(router.activeRequest?.options.map(\.label), ["Raw label A", "Raw label B"])
+
+        let command = try XCTUnwrap(router.resolveActiveRequest(with: "raw-value-b"))
+
+        XCTAssertNil(router.activeRequest)
+        XCTAssertEqual(command.type, "extension_ui_response")
+        XCTAssertEqual(command.payload["requestId"] as? String, "submit-request")
+        XCTAssertEqual(command.payload["result"] as? String, "raw-value-b")
+        XCTAssertNil(command.payload["error"])
     }
 
     func testQueueUpdateBuildsTypedVisibleEntriesAndIgnoresInvalidValues() throws {

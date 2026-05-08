@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Localize Auth and Login Surfaces"
 type: frontend
 complexity: high
@@ -30,12 +30,12 @@ Localize security-sensitive auth, subscription, login, and model-picker copy. Th
 </requirements>
 
 ## Subtasks
-- [ ] 5.1 Localize model and subscription access state copy.
-- [ ] 5.2 Localize subscription login status title/detail templates.
-- [ ] 5.3 Localize login sheet labels, buttons, tabs, and helper text.
-- [ ] 5.4 Localize model picker empty states and controls.
-- [ ] 5.5 Preserve provider names, URLs, output, and errors as raw interpolation.
-- [ ] 5.6 Update auth/login tests for both languages and verbatim values.
+- [x] 5.1 Localize model and subscription access state copy.
+- [x] 5.2 Localize subscription login status title/detail templates.
+- [x] 5.3 Localize login sheet labels, buttons, tabs, and helper text.
+- [x] 5.4 Localize model picker empty states and controls.
+- [x] 5.5 Preserve provider names, URLs, output, and errors as raw interpolation.
+- [x] 5.6 Update auth/login tests for both languages and verbatim values.
 
 ## Implementation Details
 Auth copy is a launch-quality surface. Prefer explicit keys for each state rather than broad string reuse that could blur consent or failure semantics.
@@ -68,13 +68,13 @@ Auth copy is a launch-quality surface. Prefer explicit keys for each state rathe
 
 ## Tests
 - Unit tests:
-  - [ ] Not-started subscription login status localizes template in English and pt-BR.
-  - [ ] Provider name remains unchanged inside localized status.
-  - [ ] Provider Login URL remains unchanged inside localized UI.
-  - [ ] Failure message payload remains unchanged.
-  - [ ] Model picker empty states localize app-owned text.
+  - [x] Not-started subscription login status localizes template in English and pt-BR.
+  - [x] Provider name remains unchanged inside localized status.
+  - [x] Provider Login URL remains unchanged inside localized UI.
+  - [x] Failure message payload remains unchanged.
+  - [x] Model picker empty states localize app-owned text.
 - Integration tests:
-  - [ ] Login sheet selected language changes app-owned controls but not provider names/output.
+  - [x] Login sheet selected language changes app-owned controls but not provider names/output.
 - Test coverage target: >=80%
 - All tests must pass
 

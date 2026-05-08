@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Add Core Localization API and Coverage Warnings"
 type: backend
 complexity: medium
@@ -29,12 +29,12 @@ Create the core localization API that all later tasks depend on. This task intro
 </requirements>
 
 ## Subtasks
-- [ ] 2.1 Add `AppLanguage` supported-language model.
-- [ ] 2.2 Add the `L10n` facade for selected-language lookup.
-- [ ] 2.3 Add required-key inventory for app-owned strings.
-- [ ] 2.4 Add a warning-returning coverage reporter for missing keys.
-- [ ] 2.5 Add tests for language metadata, lookup, formatting, and warnings.
-- [ ] 2.6 Document the verbatim interpolation boundary in code comments only where needed.
+- [x] 2.1 Add `AppLanguage` supported-language model.
+- [x] 2.2 Add the `L10n` facade for selected-language lookup.
+- [x] 2.3 Add required-key inventory for app-owned strings.
+- [x] 2.4 Add a warning-returning coverage reporter for missing keys.
+- [x] 2.5 Add tests for language metadata, lookup, formatting, and warnings.
+- [x] 2.6 Document the verbatim interpolation boundary in code comments only where needed.
 
 ## Implementation Details
 Follow the TechSpec "Core Interfaces" section, but ensure selected-language lookup resolves the language-specific `.lproj` bundle before calling localized lookup. The API should be public where executable-target menu code needs it.
@@ -65,13 +65,13 @@ Follow the TechSpec "Core Interfaces" section, but ensure selected-language look
 
 ## Tests
 - Unit tests:
-  - [ ] `AppLanguage` exposes stable `en` and `pt-BR` identifiers.
-  - [ ] English lookup returns the English value for a known key.
-  - [ ] pt-BR lookup returns the pt-BR value for a known key.
-  - [ ] Formatting preserves raw interpolation values.
-  - [ ] Missing required keys return structured warnings by language and key.
+  - [x] `AppLanguage` exposes stable `en` and `pt-BR` identifiers.
+  - [x] English lookup returns the English value for a known key.
+  - [x] pt-BR lookup returns the pt-BR value for a known key.
+  - [x] Formatting preserves raw interpolation values.
+  - [x] Missing required keys return structured warnings by language and key.
 - Integration tests:
-  - [ ] Coverage reporter reads actual processed resources from `Bundle.module`.
+  - [x] Coverage reporter reads actual processed resources from `Bundle.module`.
 - Test coverage target: >=80%
 - All tests must pass
 

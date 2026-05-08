@@ -109,6 +109,7 @@ public struct AppShellView: View {
         .background(Theme.windowBackground)
         .ignoresSafeArea(.container, edges: .top)
         .environment(\.uiFontSize, model.uiFontSize)
+        .environment(\.locale, Locale(identifier: model.appLanguage.localeIdentifier))
         .preferredColorScheme(model.themeVariant.colorScheme)
         .background(WindowConfigurator())
         .background(WindowKeyboardHandler(model: model))
@@ -135,7 +136,7 @@ struct CommandPaletteView: View {
                     .uiFont(size: 17, weight: .semibold)
                     .foregroundStyle(Theme.tertiaryText)
 
-                TextField("Search commands", text: $model.commandPaletteQuery)
+                TextField(model.l10n.string("command_palette.search_placeholder"), text: $model.commandPaletteQuery)
                     .textFieldStyle(.plain)
                     .uiFont(size: 18, weight: .medium)
                     .focused($isSearchFocused)
@@ -147,7 +148,7 @@ struct CommandPaletteView: View {
                         .frame(width: 26, height: 26)
                 }
                 .buttonStyle(.plain)
-                .help(DefaultKeymap.helpText(for: .closeActiveModal) ?? "Close")
+                .help(DefaultKeymap.helpText(for: .closeActiveModal, l10n: model.l10n) ?? model.localizedTitle(for: .closeActiveModal))
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 16)
@@ -158,9 +159,9 @@ struct CommandPaletteView: View {
 
             if items.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("No commands found")
+                    Text(model.l10n.string("command_palette.empty.title"))
                         .uiFont(size: 14, weight: .medium)
-                    Text("Try another command, project, session, model, or app name.")
+                    Text(model.l10n.string("command_palette.empty.detail"))
                         .uiFont(size: 13)
                         .foregroundStyle(Theme.secondaryText)
                 }
@@ -373,15 +374,15 @@ struct SidebarView: View {
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2, perform: WindowActions.zoomKeyWindow)
 
-            SidebarCommand(icon: "square.and.pencil", title: "New chat", actionID: .newChat) {
+            SidebarCommand(icon: "square.and.pencil", title: model.localizedTitle(for: .newChat), actionID: .newChat, l10n: model.l10n) {
                 model.performAppAction(.newChat)
             }
-            SidebarCommand(icon: "folder.badge.plus", title: "Open project", actionID: .openProject) {
+            SidebarCommand(icon: "folder.badge.plus", title: model.localizedTitle(for: .openProject), actionID: .openProject, l10n: model.l10n) {
                 model.performAppAction(.openProject)
             }
 
             VStack(alignment: .leading, spacing: 0) {
-                SmallCapsLabel(title: "Projects")
+                SmallCapsLabel(title: model.l10n.string("app_shell.sidebar.projects"))
                     .padding(.horizontal, 14)
                     .padding(.top, 26)
                     .padding(.bottom, 12)
@@ -400,16 +401,16 @@ struct SidebarView: View {
 
             Spacer()
 
-            SidebarCommand(icon: "list.bullet.rectangle", title: "Process log", actionID: .openProcessLog) {
+            SidebarCommand(icon: "list.bullet.rectangle", title: model.l10n.string("app_shell.sidebar.process_log"), actionID: .openProcessLog, l10n: model.l10n) {
                 model.performAppAction(.openProcessLog)
             }
-            SidebarCommand(icon: "keyboard", title: "Help", actionID: .openKeybindingHelp) {
+            SidebarCommand(icon: "keyboard", title: model.l10n.string("app_shell.sidebar.help"), actionID: .openKeybindingHelp, l10n: model.l10n) {
                 model.performAppAction(.openKeybindingHelp)
             }
-            SidebarCommand(icon: "key", title: "Login") {
+            SidebarCommand(icon: "key", title: model.l10n.string("command_palette.login.title")) {
                 model.isShowingLogin = true
             }
-            SidebarCommand(icon: "gearshape", title: "Settings", actionID: .openSettings) {
+            SidebarCommand(icon: "gearshape", title: model.l10n.string("app_shell.sidebar.settings"), actionID: .openSettings, l10n: model.l10n) {
                 model.performAppAction(.openSettings)
             }
                 .padding(.bottom, 14)
@@ -476,16 +477,17 @@ struct SidebarTitlebarControls: View {
             Spacer()
             HeaderIconButton(
                 systemImage: "sidebar.left",
-                title: "Toggle sidebar",
+                title: model.localizedTitle(for: .toggleSidebar),
                 actionID: .toggleSidebar,
                 isEnabled: model.canPerformAppAction(.toggleSidebar),
-                disabledHelp: "Close active modal first"
+                disabledHelp: model.l10n.string("app_model.status.close_active_modal_first"),
+                l10n: model.l10n
             ) {
                 model.performAppAction(.toggleSidebar)
             }
             HeaderIconButton(
                 systemImage: "chevron.left",
-                title: "Previous session",
+                title: model.l10n.string("app_model.session.previous"),
                 isEnabled: model.canNavigateToPreviousSession(),
                 disabledHelp: model.previousSessionHelpText()
             ) {
@@ -494,7 +496,7 @@ struct SidebarTitlebarControls: View {
             .padding(.leading, 16)
             HeaderIconButton(
                 systemImage: "chevron.right",
-                title: "Next session",
+                title: model.l10n.string("app_model.session.next"),
                 isEnabled: model.canNavigateToNextSession(),
                 disabledHelp: model.nextSessionHelpText()
             ) {
@@ -513,6 +515,7 @@ struct HeaderIconButton: View {
     var actionID: AppActionID?
     var isEnabled: Bool
     var disabledHelp: String?
+    var l10n: L10n? = nil
     let action: () -> Void
 
     var body: some View {
@@ -535,7 +538,7 @@ struct HeaderIconButton: View {
         }
 
         if let actionID {
-            return DefaultKeymap.helpText(for: actionID, title: title) ?? title
+            return DefaultKeymap.helpText(for: actionID, title: title, l10n: l10n) ?? title
         }
 
         return title
@@ -570,6 +573,7 @@ struct SidebarCommand: View {
     let icon: String
     let title: String
     var actionID: AppActionID?
+    var l10n: L10n? = nil
     let action: () -> Void
 
     var body: some View {
@@ -592,7 +596,7 @@ struct SidebarCommand: View {
 
     private var helpText: String {
         guard let actionID else { return title }
-        return DefaultKeymap.helpText(for: actionID, title: title) ?? title
+        return DefaultKeymap.helpText(for: actionID, title: title, l10n: l10n) ?? title
     }
 }
 
@@ -602,7 +606,7 @@ struct KeybindingHelpView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
-                Text("Keyboard Shortcuts")
+                Text(model.l10n.string("keybinding.help.title"))
                     .uiFont(size: 22, weight: .semibold)
                 Spacer()
                 Button {
@@ -612,12 +616,12 @@ struct KeybindingHelpView: View {
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
-                .help(DefaultKeymap.helpText(for: .closeActiveModal) ?? "Close active modal")
+                .help(DefaultKeymap.helpText(for: .closeActiveModal, l10n: model.l10n) ?? model.localizedTitle(for: .closeActiveModal))
             }
 
             VStack(spacing: 16) {
                 ForEach(KeybindingHelpGroup.allCases, id: \.self) { group in
-                    KeybindingHelpSection(group: group)
+                    KeybindingHelpSection(group: group, l10n: model.l10n)
                 }
             }
         }
@@ -629,15 +633,16 @@ struct KeybindingHelpView: View {
 
 struct KeybindingHelpSection: View {
     let group: KeybindingHelpGroup
+    let l10n: L10n
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SmallCapsLabel(title: group.rawValue)
+            SmallCapsLabel(title: group.localizedTitle(l10n: l10n))
 
             VStack(spacing: 0) {
                 ForEach(DefaultKeymap.definitions(in: group)) { definition in
                     HStack(spacing: 14) {
-                        Text(definition.title)
+                        Text(definition.localizedTitle(l10n: l10n))
                             .uiFont(size: 14)
                             .foregroundStyle(Theme.primaryText)
                         Spacer()

@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Complete Localization Verification Sweep"
 type: chore
 complexity: high
@@ -35,12 +35,12 @@ Complete the cross-surface localization verification pass after all implementati
 </requirements>
 
 ## Subtasks
-- [ ] 11.1 Review all exact-English assertions touched by localization.
-- [ ] 11.2 Add representative locale tests for each V1 surface group.
-- [ ] 11.3 Run required-key warning coverage and record warnings for maintainer review.
-- [ ] 11.4 Verify verbatim technical boundaries in auth, chat, logs, paths, diffs, and RPC/tool output.
-- [ ] 11.5 Run full automated verification and package-resource check.
-- [ ] 11.6 Prepare the maintainer and AI-assisted review checklist.
+- [x] 11.1 Review all exact-English assertions touched by localization.
+- [x] 11.2 Add representative locale tests for each V1 surface group.
+- [x] 11.3 Run required-key warning coverage and record warnings for maintainer review.
+- [x] 11.4 Verify verbatim technical boundaries in auth, chat, logs, paths, diffs, and RPC/tool output.
+- [x] 11.5 Run full automated verification and package-resource check.
+- [x] 11.6 Prepare the maintainer and AI-assisted review checklist.
 
 ## Implementation Details
 This is the final integration and verification task, not a substitute for tests in earlier tasks. Keep changes limited to test coverage gaps, required-key inventory gaps, verification documentation, and small fixes needed to complete the release gate.
@@ -79,14 +79,14 @@ This is the final integration and verification task, not a substitute for tests 
 
 ## Tests
 - Unit tests:
-  - [ ] Localization lookup tests pass for English and pt-BR.
-  - [ ] Coverage reporter emits warnings for intentionally missing keys.
-  - [ ] Exact-English assertions are replaced with language-scoped expectations where appropriate.
-  - [ ] Verbatim boundary tests pass for provider names, URLs, paths, model IDs, prompts, assistant text, diffs, logs, and tool output.
+  - [x] Localization lookup tests pass for English and pt-BR.
+  - [x] Coverage reporter emits warnings for intentionally missing keys.
+  - [x] Exact-English assertions are replaced with language-scoped expectations where appropriate.
+  - [x] Verbatim boundary tests pass for provider names, URLs, paths, model IDs, prompts, assistant text, diffs, logs, and tool output.
 - Integration tests:
-  - [ ] `rtk swift test` passes.
-  - [ ] `rtk ./Scripts/build-app.sh debug` packages localization resources.
-  - [ ] Required-key warning output is reviewed and does not hide launch-blocking omissions.
+  - [x] `rtk swift test` passes.
+  - [x] `rtk ./Scripts/build-app.sh debug` packages localization resources.
+  - [x] Required-key warning output is reviewed and does not hide launch-blocking omissions.
 - Test coverage target: >=80%
 - All tests must pass
 

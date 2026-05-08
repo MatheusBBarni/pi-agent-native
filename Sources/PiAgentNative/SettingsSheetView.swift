@@ -6,12 +6,29 @@ struct SettingsSheetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack {
-                Text("Settings")
+                Text(model.l10n.string("settings.title"))
                     .uiFont(size: 20, weight: .semibold)
                 Spacer()
-                Button("Done") {
+                Button(model.l10n.string("settings.done")) {
                     model.isShowingSettings = false
                 }
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text(model.l10n.string("settings.language.title"))
+                    .uiFont(size: 13, weight: .medium)
+                    .foregroundStyle(Theme.secondaryText)
+
+                Picker(selection: languageBinding) {
+                    ForEach(AppLanguage.allCases) { language in
+                        Text(model.l10n.string(language.settingsLabelKey))
+                            .tag(language)
+                    }
+                } label: {
+                    Text(model.l10n.string("settings.language.picker"))
+                }
+                .pickerStyle(.menu)
+                .frame(width: 220, alignment: .leading)
             }
 
             VStack(alignment: .leading, spacing: 10) {
@@ -88,6 +105,13 @@ struct SettingsSheetView: View {
             set: { model.customExecutablePath = $0 }
         )
     }
+
+    private var languageBinding: Binding<AppLanguage> {
+        Binding(
+            get: { model.appLanguage },
+            set: { model.appLanguage = $0 }
+        )
+    }
 }
 
 private struct SettingsDiagnosticRow: View {
@@ -107,6 +131,17 @@ private struct SettingsDiagnosticRow: View {
                 .lineLimit(2)
                 .truncationMode(.middle)
                 .textSelection(.enabled)
+        }
+    }
+}
+
+private extension AppLanguage {
+    var settingsLabelKey: String {
+        switch self {
+        case .english:
+            return "settings.language.english"
+        case .portugueseBrazil:
+            return "settings.language.portuguese_brazil"
         }
     }
 }

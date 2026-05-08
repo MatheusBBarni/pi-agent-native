@@ -278,13 +278,15 @@ struct PiExtensionUIRequest: Identifiable, Equatable {
     var options: [Option] {
         guard let rawOptions = params["options"] as? [Any] else { return [] }
         return rawOptions.enumerated().compactMap { index, raw in
+            if let option = raw as? [String: Any] {
+                let value = PiRPCValue.string(option["value"]) ?? PiRPCValue.string(option["id"]) ?? "\(index)"
+                let label = PiRPCValue.string(option["label"]) ?? PiRPCValue.string(option["title"]) ?? value
+                return Option(id: value, label: label, value: value)
+            }
             if let text = PiRPCValue.string(raw) {
                 return Option(id: text, label: text, value: text)
             }
-            guard let option = raw as? [String: Any] else { return nil }
-            let value = PiRPCValue.string(option["value"]) ?? PiRPCValue.string(option["id"]) ?? "\(index)"
-            let label = PiRPCValue.string(option["label"]) ?? PiRPCValue.string(option["title"]) ?? value
-            return Option(id: value, label: label, value: value)
+            return nil
         }
     }
 }
