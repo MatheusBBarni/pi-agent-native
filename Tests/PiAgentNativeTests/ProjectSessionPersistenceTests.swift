@@ -121,7 +121,7 @@ final class ProjectSessionPersistenceTests: XCTestCase {
     }
 
     @MainActor
-    func testStaleProjectRemainsInNormalProjectListOnStartup() {
+    func testStaleProjectIsDroppedOnStartup() {
         let databaseURL = temporaryDatabaseURL()
         SessionStore.databaseURLForTesting = databaseURL
         let staleProject = ProjectItem(id: "project-1", name: "Missing", path: temporaryDirectoryURL().appendingPathComponent("Missing").path)
@@ -129,13 +129,17 @@ final class ProjectSessionPersistenceTests: XCTestCase {
 
         let model = AppModel()
 
-        XCTAssertEqual(model.projects, [staleProject])
-        XCTAssertEqual(model.projects.first?.availability, .stale)
-        XCTAssertEqual(model.selectedProjectID, staleProject.id)
+        XCTAssertTrue(model.projects.isEmpty)
+        XCTAssertNil(model.selectedProjectID)
+        XCTAssertEqual(model.workspacePath, "")
+
+        let persistedState = SessionStore.load()
+        XCTAssertTrue(persistedState.projects.isEmpty)
+        XCTAssertNil(persistedState.selectedProjectID)
     }
 
     @MainActor
-    func testStartupRestoresAvailableAndMissingProjectsWithComputedAvailability() throws {
+    func testStartupRestoresOnlyAvailableProjects() throws {
         let databaseURL = temporaryDatabaseURL()
         SessionStore.databaseURLForTesting = databaseURL
         let availableDirectory = temporaryDirectoryURL().appendingPathComponent("Available", isDirectory: true)
@@ -154,11 +158,54 @@ final class ProjectSessionPersistenceTests: XCTestCase {
 
         let model = AppModel()
 
-        XCTAssertEqual(model.projects.map(\.id), ["available", "missing"])
-        XCTAssertEqual(model.projects.first { $0.id == availableProject.id }?.availability, .available)
-        XCTAssertEqual(model.projects.first { $0.id == staleProject.id }?.availability, .stale)
+        XCTAssertEqual(model.projects, [availableProject])
         XCTAssertEqual(model.selectedProjectID, availableProject.id)
         XCTAssertEqual(model.workspacePath, availableProject.path)
+    }
+
+    @MainActor
+    func testStartupFallsBackToAvailableProjectWhenSelectedProjectIsStale() throws {
+        let databaseURL = temporaryDatabaseURL()
+        SessionStore.databaseURLForTesting = databaseURL
+        let availableDirectory = temporaryDirectoryURL().appendingPathComponent("Available", isDirectory: true)
+        try FileManager.default.createDirectory(at: availableDirectory, withIntermediateDirectories: true)
+        let staleProject = ProjectItem(id: "missing", name: "Missing", path: temporaryDirectoryURL().appendingPathComponent("Missing").path)
+        let availableProject = ProjectItem(id: "available", name: "Available", path: availableDirectory.path)
+
+        SessionStore.save(AppPersistedState(
+            projects: [staleProject, availableProject],
+            selectedProjectID: staleProject.id
+        ))
+
+        let model = AppModel()
+
+        XCTAssertEqual(model.projects, [availableProject])
+        XCTAssertEqual(model.selectedProjectID, availableProject.id)
+        XCTAssertEqual(model.workspacePath, availableProject.path)
+
+        let persistedState = SessionStore.load()
+        XCTAssertEqual(persistedState.projects, [availableProject])
+        XCTAssertEqual(persistedState.selectedProjectID, availableProject.id)
+    }
+
+    @MainActor
+    func testAddingProjectPersistsItAcrossAppModelInitialization() throws {
+        let databaseURL = temporaryDatabaseURL()
+        SessionStore.databaseURLForTesting = databaseURL
+        let projectDirectory = temporaryDirectoryURL().appendingPathComponent("Repo", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDirectory, withIntermediateDirectories: true)
+
+        let model = AppModel()
+        model.addProject(path: projectDirectory.path)
+
+        let restoredModel = AppModel()
+        let restoredProject = try XCTUnwrap(restoredModel.projects.first)
+
+        XCTAssertEqual(restoredModel.projects.count, 1)
+        XCTAssertEqual(restoredProject.name, "Repo")
+        XCTAssertEqual(restoredProject.path, projectDirectory.path)
+        XCTAssertEqual(restoredModel.selectedProjectID, restoredProject.id)
+        XCTAssertEqual(restoredModel.workspacePath, projectDirectory.path)
     }
 
     @MainActor
@@ -238,20 +285,21 @@ final class ProjectSessionPersistenceTests: XCTestCase {
     }
 
     @MainActor
-    func testRemovingSelectedStaleProjectClearsSelectedProjectAndSession() {
+    func testRemovingSelectedStaleProjectClearsSelectedProjectAndSession() throws {
         let databaseURL = temporaryDatabaseURL()
         SessionStore.databaseURLForTesting = databaseURL
-        let staleProject = ProjectItem(id: "project-1", name: "Missing", path: temporaryDirectoryURL().appendingPathComponent("Missing").path)
-        let session = storedSession(id: "session-1", project: staleProject)
-        SessionStore.save(AppPersistedState(
-            projects: [staleProject],
-            sessions: [session],
-            selectedProjectID: staleProject.id,
-            selectedSessionID: session.id
-        ))
+        let projectDirectory = temporaryDirectoryURL().appendingPathComponent("Repo", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDirectory, withIntermediateDirectories: true)
         let model = AppModel()
+        model.addProject(path: projectDirectory.path)
+        let project = try XCTUnwrap(model.selectedProject)
+        let session = storedSession(id: "session-1", project: project)
+        model.sessions = [session]
+        model.selectedSessionID = session.id
+        try FileManager.default.removeItem(at: projectDirectory)
+        XCTAssertEqual(project.availability, .stale)
 
-        model.removeStaleProject(staleProject)
+        model.removeStaleProject(project)
 
         XCTAssertTrue(model.projects.isEmpty)
         XCTAssertTrue(model.sessions.isEmpty)
@@ -284,14 +332,9 @@ final class ProjectSessionPersistenceTests: XCTestCase {
         """.utf8).write(to: executableURL)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path)
 
-        let project = ProjectItem(id: "project-1", name: "Repo", path: projectDirectory.path)
-        SessionStore.save(AppPersistedState(
-            projects: [project],
-            sessions: [],
-            selectedProjectID: project.id,
-            selectedSessionID: nil
-        ))
         let model = AppModel()
+        model.addProject(path: projectDirectory.path)
+        let project = try XCTUnwrap(model.selectedProject)
         model.customExecutablePath = executableURL.path
 
         model.start()
@@ -356,17 +399,14 @@ final class ProjectSessionPersistenceTests: XCTestCase {
         try FileManager.default.createDirectory(at: siblingDirectory, withIntermediateDirectories: true)
         let siblingFileURL = siblingDirectory.appendingPathComponent("keep.txt")
         try Data("keep sibling".utf8).write(to: siblingFileURL)
-        let project = ProjectItem(id: "project-1", name: "Repo", path: projectDirectory.path)
+        let model = AppModel()
+        model.addProject(path: projectDirectory.path)
+        let project = try XCTUnwrap(model.selectedProject)
         let session = storedSession(id: "session-1", project: project)
-        SessionStore.save(AppPersistedState(
-            projects: [project],
-            sessions: [session],
-            selectedProjectID: project.id,
-            selectedSessionID: session.id
-        ))
+        model.sessions = [session]
+        model.selectedSessionID = session.id
         try FileManager.default.removeItem(at: projectDirectory)
         XCTAssertEqual(project.availability, .stale)
-        let model = AppModel()
 
         model.removeStaleProject(project)
 

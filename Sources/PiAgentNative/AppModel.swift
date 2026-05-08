@@ -187,7 +187,9 @@ public final class AppModel: ObservableObject {
         let persistedProjects = Self.normalizePersistedProjects(persistedState.projects)
         let persistedProjectIDs = Set(persistedProjects.map(\.id))
         let persistedSessions = persistedState.sessions.filter { persistedProjectIDs.contains($0.projectID) }
-        let persistedSelectedProjectID = persistedProjects.first(where: { $0.id == persistedState.selectedProjectID })?.id
+        let persistedSelectedProjectID = persistedState.selectedProjectID.flatMap { selectedProjectID in
+            persistedProjects.first(where: { $0.id == selectedProjectID })?.id ?? persistedProjects.first?.id
+        }
         let persistedSelectedSessionID = persistedSessions.first(where: { $0.id == persistedState.selectedSessionID })?.id
 
         settingsStore = SettingsStore(customExecutablePath: storedExecutable ?? "")
@@ -298,7 +300,8 @@ public final class AppModel: ObservableObject {
         return persistedProjects.compactMap { item in
             let normalizedPath = URL(fileURLWithPath: item.path).standardized.path
             guard !normalizedPath.isEmpty,
-                  !seenPaths.contains(normalizedPath)
+                  !seenPaths.contains(normalizedPath),
+                  ProjectAvailability(path: normalizedPath) == .available
             else {
                 return nil
             }
