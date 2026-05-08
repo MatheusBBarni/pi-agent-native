@@ -10,19 +10,19 @@ final class WorkspaceStore: ObservableObject {
 
     init(
         projects: [ProjectItem] = [],
-        selectedProjectPath: String? = nil,
+        selectedProjectID: ProjectItem.ID? = nil,
         availableExternalTargets: [AvailableExternalTarget] = []
     ) {
         self.projects = projects
         self.availableExternalTargets = availableExternalTargets
 
-        if let selectedProjectPath,
-           let selectedProject = projects.first(where: { $0.path == selectedProjectPath }) {
-            selectedProjectID = selectedProject.id
+        if let selectedProjectID,
+           let selectedProject = projects.first(where: { $0.id == selectedProjectID }) {
+            self.selectedProjectID = selectedProject.id
             workspacePath = selectedProject.path
             expandedProjectIDs = [selectedProject.id]
         } else {
-            selectedProjectID = nil
+            self.selectedProjectID = nil
             workspacePath = ""
             expandedProjectIDs = []
         }
@@ -52,6 +52,23 @@ final class WorkspaceStore: ObservableObject {
         projects.append(project)
         select(project)
         return project
+    }
+
+    @discardableResult
+    func removeProject(id projectID: ProjectItem.ID) -> ProjectItem? {
+        guard let index = projects.firstIndex(where: { $0.id == projectID }) else {
+            return nil
+        }
+
+        let removedProject = projects.remove(at: index)
+        expandedProjectIDs.remove(projectID)
+
+        if selectedProjectID == projectID {
+            selectedProjectID = nil
+            workspacePath = ""
+        }
+
+        return removedProject
     }
 
     func toggle(_ project: ProjectItem) {

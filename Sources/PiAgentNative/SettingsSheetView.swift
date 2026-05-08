@@ -60,12 +60,9 @@ struct SettingsSheetView: View {
                 TextField("Custom executable path", text: customExecutableBinding)
                     .textFieldStyle(.roundedBorder)
 
-                SettingsDiagnosticRow(title: "Validation", value: model.settingsStore.executableValidationMessage)
-                SettingsDiagnosticRow(title: "PI_MONO_PATH", value: model.settingsStore.piMonoPath)
-                SettingsDiagnosticRow(
-                    title: "Resolved command",
-                    value: "\(model.settingsStore.resolvedLaunchPreview.diagnostic) --mode rpc"
-                )
+                ForEach(diagnostics.launchDiagnostics) { item in
+                    SettingsDiagnosticRow(title: item.title, value: item.value)
+                }
             }
 
             VStack(alignment: .leading, spacing: 10) {
@@ -73,13 +70,18 @@ struct SettingsSheetView: View {
                     .uiFont(size: 13, weight: .medium)
                     .foregroundStyle(Theme.secondaryText)
 
-                SettingsDiagnosticRow(title: "Sessions", value: model.settingsStore.sessionStorePath)
-                SettingsDiagnosticRow(title: "Auth", value: model.settingsStore.authDirectoryPath)
+                ForEach(diagnostics.stateDiagnostics) { item in
+                    SettingsDiagnosticRow(title: item.title, value: item.value)
+                }
             }
         }
         .padding(22)
         .frame(width: 560)
         .background(Theme.windowBackground)
+    }
+
+    private var diagnostics: SettingsDiagnosticsPresentation {
+        SettingsDiagnosticsPresentation(settingsStore: model.settingsStore)
     }
 
     private var customExecutableBinding: Binding<String> {

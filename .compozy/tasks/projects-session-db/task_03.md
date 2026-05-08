@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Persist Projects, Sessions, and Selection in SQLite
 type: backend
 complexity: high
@@ -31,11 +31,11 @@ This task completes the SQLite persistence behavior for projects, sessions, and 
 </requirements>
 
 ## Subtasks
-- [ ] 3.1 Persist and load project records.
-- [ ] 3.2 Persist and load session records.
-- [ ] 3.3 Persist and load selected project/session identity.
-- [ ] 3.4 Enforce project path uniqueness in persistence behavior.
-- [ ] 3.5 Add store round-trip tests for project/session/selection state.
+- [x] 3.1 Persist and load project records.
+- [x] 3.2 Persist and load session records.
+- [x] 3.3 Persist and load selected project/session identity.
+- [x] 3.4 Enforce project path uniqueness in persistence behavior.
+- [x] 3.5 Add store round-trip tests for project/session/selection state.
 
 ## Implementation Details
 Modify `Sources/PiAgentNative/SessionStore.swift`. Extend `Tests/PiAgentNativeCoreTests/SessionStoreTests.swift`. Use the schema from TechSpec "Data Models" and keep the public store boundary simple.

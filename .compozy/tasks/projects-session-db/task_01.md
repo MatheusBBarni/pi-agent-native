@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Add SQLite Store Harness and Schema Bootstrap
 type: backend
 complexity: high
@@ -28,11 +28,11 @@ This task establishes the SQLite persistence foundation for project/session cont
 </requirements>
 
 ## Subtasks
-- [ ] 1.1 Add system SQLite linkage/import support to the Swift package.
-- [ ] 1.2 Replace the JSON store bootstrap with a SQLite database bootstrap path.
-- [ ] 1.3 Add schema creation for the project/session continuity tables.
-- [ ] 1.4 Add a temporary database harness for tests.
-- [ ] 1.5 Add focused tests for empty database creation and schema bootstrap.
+- [x] 1.1 Add system SQLite linkage/import support to the Swift package.
+- [x] 1.2 Replace the JSON store bootstrap with a SQLite database bootstrap path.
+- [x] 1.3 Add schema creation for the project/session continuity tables.
+- [x] 1.4 Add a temporary database harness for tests.
+- [x] 1.5 Add focused tests for empty database creation and schema bootstrap.
 
 ## Implementation Details
 Modify `Package.swift` and `Sources/PiAgentNative/SessionStore.swift`. Create `Tests/PiAgentNativeCoreTests/SessionStoreTests.swift` for low-level store behavior. Follow the TechSpec "Core Interfaces" and "Data Models" sections, but do not implement full project/session persistence until task 03.
@@ -59,12 +59,12 @@ Modify `Package.swift` and `Sources/PiAgentNative/SessionStore.swift`. Create `T
 
 ## Tests
 - Unit tests:
-  - [ ] Fresh temporary DB path: `SessionStore.load()` creates schema and returns empty state.
-  - [ ] Existing empty DB path: repeated `load()` does not recreate or corrupt schema.
-  - [ ] Invalid parent path or open failure returns empty state without crashing.
-  - [ ] Store URL points to application support and ends with the SQLite database filename.
+  - [x] Fresh temporary DB path: `SessionStore.load()` creates schema and returns empty state.
+  - [x] Existing empty DB path: repeated `load()` does not recreate or corrupt schema.
+  - [x] Invalid parent path or open failure returns empty state without crashing.
+  - [x] Store URL points to application support and ends with the SQLite database filename.
 - Integration tests:
-  - [ ] SwiftPM can build and link `PiAgentNativeCore` with system SQLite.
+  - [x] SwiftPM can build and link `PiAgentNativeCore` with system SQLite.
 - Test coverage target: >=80%
 - All tests must pass
 

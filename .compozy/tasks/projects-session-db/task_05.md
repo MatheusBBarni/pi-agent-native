@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Add Computed Project Availability and Stale Removal
 type: backend
 complexity: medium
@@ -30,11 +30,11 @@ This task adds the core stale-project behavior required by the PRD. It computes 
 </requirements>
 
 ## Subtasks
-- [ ] 5.1 Add project availability helper logic.
-- [ ] 5.2 Add project removal to `WorkspaceStore`.
-- [ ] 5.3 Add associated session removal to `NativeSessionIndexStore`.
-- [ ] 5.4 Add `AppModel` stale project removal orchestration.
-- [ ] 5.5 Add tests proving local removal does not touch filesystem content.
+- [x] 5.1 Add project availability helper logic.
+- [x] 5.2 Add project removal to `WorkspaceStore`.
+- [x] 5.3 Add associated session removal to `NativeSessionIndexStore`.
+- [x] 5.4 Add `AppModel` stale project removal orchestration.
+- [x] 5.5 Add tests proving local removal does not touch filesystem content.
 
 ## Implementation Details
 Modify `Sources/PiAgentNative/Workspace/WorkspaceStore.swift`, `Sources/PiAgentNative/Sessions/NativeSessionIndexStore.swift`, and `Sources/PiAgentNative/AppModel.swift`. Keep removal action ownership in AppModel/store layers, not direct persistence mutation.

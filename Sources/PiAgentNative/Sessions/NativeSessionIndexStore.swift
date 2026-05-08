@@ -16,7 +16,7 @@ final class NativeSessionIndexStore: ObservableObject {
 
     func sessionsForProject(_ project: ProjectItem, runningSessionID: StoredSession.ID?, isRunning: (StoredSession) -> Bool) -> [StoredSession] {
         sessions
-            .filter { $0.projectPath == project.path }
+            .filter { $0.projectID == project.id }
             .sorted { lhs, rhs in
                 let lhsIsRunning = lhs.id == runningSessionID && isRunning(lhs)
                 let rhsIsRunning = rhs.id == runningSessionID && isRunning(rhs)
@@ -28,12 +28,21 @@ final class NativeSessionIndexStore: ObservableObject {
     }
 
     func lastOpenedSession(for project: ProjectItem) -> StoredSession? {
-        Self.lastOpenedSession(in: sessions, projectPath: project.path)
+        Self.lastOpenedSession(in: sessions, projectID: project.id, projectPath: project.path)
     }
 
     static func lastOpenedSession(in sessions: [StoredSession], projectPath: String) -> StoredSession? {
+        lastOpenedSession(in: sessions, projectID: nil, projectPath: projectPath)
+    }
+
+    static func lastOpenedSession(in sessions: [StoredSession], projectID: String?, projectPath: String) -> StoredSession? {
         sessions
-            .filter { $0.projectPath == projectPath && !$0.sessionFile.isEmpty }
+            .filter { session in
+                if let projectID {
+                    return session.projectID == projectID && !session.sessionFile.isEmpty
+                }
+                return session.projectPath == projectPath && !session.sessionFile.isEmpty
+            }
             .sorted { $0.updatedAt > $1.updatedAt }
             .first
     }
@@ -52,9 +61,30 @@ final class NativeSessionIndexStore: ObservableObject {
         sessions[index].updatedAt = Date()
     }
 
-    func upsert(sessionID: String, project: ProjectItem, title: String, status: String, sessionFile: String) {
+    @discardableResult
+    func removeSessions(forProjectID projectID: ProjectItem.ID) -> [StoredSession] {
+        let removedSessions = sessions.filter { $0.projectID == projectID }
+        guard !removedSessions.isEmpty else { return [] }
+
+        let removedSessionIDs = Set(removedSessions.map(\.id))
+        sessions.removeAll { $0.projectID == projectID }
+
+        if let selectedSessionID, removedSessionIDs.contains(selectedSessionID) {
+            self.selectedSessionID = nil
+        }
+
+        return removedSessions
+    }
+
+    @discardableResult
+    func upsert(sessionID piSessionID: String, project: ProjectItem, title: String, status: String, sessionFile: String) -> StoredSession.ID {
+        let localSessionID = sessions.first {
+            $0.projectID == project.id && $0.piSessionID == piSessionID
+        }?.id ?? UUID().uuidString
         let session = StoredSession(
-            id: sessionID,
+            id: localSessionID,
+            piSessionID: piSessionID,
+            projectID: project.id,
             projectPath: project.path,
             projectName: project.name,
             title: title,
@@ -62,11 +92,12 @@ final class NativeSessionIndexStore: ObservableObject {
             sessionFile: sessionFile,
             updatedAt: Date()
         )
-        if let index = sessions.firstIndex(where: { $0.id == sessionID }) {
+        if let index = sessions.firstIndex(where: { $0.id == localSessionID }) {
             sessions[index] = session
         } else {
             sessions.append(session)
         }
-        selectedSessionID = sessionID
+        selectedSessionID = localSessionID
+        return localSessionID
     }
 }

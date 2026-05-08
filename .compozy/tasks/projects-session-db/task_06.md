@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Render Stale Projects and Session Metadata in Sidebar
 type: frontend
 complexity: medium
@@ -29,11 +29,11 @@ This task exposes the continuity state in the sidebar. It adds stale project pre
 </requirements>
 
 ## Subtasks
-- [ ] 6.1 Update project row presentation for stale state.
-- [ ] 6.2 Add stale project remove action in the sidebar.
-- [ ] 6.3 Update session row presentation for required metadata.
-- [ ] 6.4 Disable or guard interactions that cannot work for stale projects.
-- [ ] 6.5 Add presentation-focused tests or helper tests for stale and resumable display states.
+- [x] 6.1 Update project row presentation for stale state.
+- [x] 6.2 Add stale project remove action in the sidebar.
+- [x] 6.3 Update session row presentation for required metadata.
+- [x] 6.4 Disable or guard interactions that cannot work for stale projects.
+- [x] 6.5 Add presentation-focused tests or helper tests for stale and resumable display states.
 
 ## Implementation Details
 Modify `Sources/PiAgentNative/AppShellView.swift`. Extract small presentation helpers if needed to make stale/resumable display testable without snapshot tests. Keep archive/delete actions out of V1.
@@ -60,13 +60,13 @@ Modify `Sources/PiAgentNative/AppShellView.swift`. Extract small presentation he
 
 ## Tests
 - Unit tests:
-  - [ ] Available project row presentation does not show stale/remove state.
-  - [ ] Stale project row presentation shows stale state and remove action.
-  - [ ] Session row presentation includes title, status, updated time, and resumability copy or icon metadata.
-  - [ ] Non-resumable session presentation is distinguishable from resumable state.
+  - [x] Available project row presentation does not show stale/remove state.
+  - [x] Stale project row presentation shows stale state and remove action.
+  - [x] Session row presentation includes title, status, updated time, and resumability copy or icon metadata.
+  - [x] Non-resumable session presentation is distinguishable from resumable state.
 - Integration tests:
-  - [ ] Activating stale remove in the sidebar calls AppModel removal behavior.
-  - [ ] Stale project row does not trigger session restore/start behavior.
+  - [x] Activating stale remove in the sidebar calls AppModel removal behavior.
+  - [x] Stale project row does not trigger session restore/start behavior.
 - Test coverage target: >=80%
 - All tests must pass
 

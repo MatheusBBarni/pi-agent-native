@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Cover Restore, Stale State, and Removal Integration
 type: test
 complexity: medium
@@ -31,11 +31,11 @@ This task adds cross-component verification for the finished continuity slice. E
 </requirements>
 
 ## Subtasks
-- [ ] 8.1 Add cross-component restore tests using a temporary database.
-- [ ] 8.2 Add stale project restore tests using missing and existing temporary paths.
-- [ ] 8.3 Add stale removal tests that verify local records and filesystem safety.
-- [ ] 8.4 Add sidebar-facing metadata tests for session display state.
-- [ ] 8.5 Run focused test filters and full validation command.
+- [x] 8.1 Add cross-component restore tests using a temporary database.
+- [x] 8.2 Add stale project restore tests using missing and existing temporary paths.
+- [x] 8.3 Add stale removal tests that verify local records and filesystem safety.
+- [x] 8.4 Add sidebar-facing metadata tests for session display state.
+- [x] 8.5 Run focused test filters and full validation command.
 
 ## Implementation Details
 Create or extend `Tests/PiAgentNativeTests/ProjectSessionPersistenceTests.swift` and related test files. Use temporary database support from task 01. Do not duplicate low-level SQL tests already covered by `SessionStoreTests`.
@@ -66,14 +66,14 @@ Create or extend `Tests/PiAgentNativeTests/ProjectSessionPersistenceTests.swift`
 
 ## Tests
 - Unit tests:
-  - [ ] Presentation helper for session metadata returns expected values for resumable and non-resumable sessions.
-  - [ ] Diagnostic path helper returns the SQLite database path.
+  - [x] Presentation helper for session metadata returns expected values for resumable and non-resumable sessions.
+  - [x] Diagnostic path helper returns the SQLite database path.
 - Integration tests:
-  - [ ] Save projects/sessions, recreate AppModel or equivalent state, and restore the same selected context.
-  - [ ] Restore a missing project path and keep it visible as stale.
-  - [ ] Remove a stale project and verify associated sessions are removed from local state.
-  - [ ] Remove a stale project and verify an existing temporary directory is not deleted.
-  - [ ] Focused filters for `SessionStoreTests`, `ProjectSessionPersistenceTests`, `HeaderActionTests`, and `InspectorPaneToggleTests` pass or unrelated pre-existing failures are documented.
+  - [x] Save projects/sessions, recreate AppModel or equivalent state, and restore the same selected context.
+  - [x] Restore a missing project path and keep it visible as stale.
+  - [x] Remove a stale project and verify associated sessions are removed from local state.
+  - [x] Remove a stale project and verify an existing temporary directory is not deleted.
+  - [x] Focused filters for `SessionStoreTests`, `ProjectSessionPersistenceTests`, `HeaderActionTests`, and `InspectorPaneToggleTests` pass or unrelated pre-existing failures are documented.
 - Test coverage target: >=80%
 - All tests must pass
 

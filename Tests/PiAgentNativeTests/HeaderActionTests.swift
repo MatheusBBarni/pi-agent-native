@@ -3,6 +3,24 @@ import XCTest
 
 @MainActor
 final class HeaderActionTests: XCTestCase {
+    private var temporaryURLs: [URL] = []
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        SessionStore.databaseURLForTesting = temporaryDatabaseURL()
+    }
+
+    override func tearDownWithError() throws {
+        SessionStore.databaseURLForTesting = nil
+
+        for url in temporaryURLs {
+            try? FileManager.default.removeItem(at: url)
+        }
+        temporaryURLs.removeAll()
+
+        try super.tearDownWithError()
+    }
+
     func testSidebarToggleUsesCentralAppActionAndModalBlocking() {
         let model = AppModel()
 
@@ -92,6 +110,158 @@ final class HeaderActionTests: XCTestCase {
         XCTAssertFalse(actionIDs.contains("nextSession"))
     }
 
+    func testAvailableProjectSidebarPresentationDoesNotShowStaleOrRemoveState() throws {
+        let project = try availableProject(id: "project", name: "Repo")
+
+        let presentation = SidebarProjectRowPresentation(project: project)
+
+        XCTAssertFalse(presentation.isStale)
+        XCTAssertNil(presentation.metadataText)
+        XCTAssertFalse(presentation.showsRemoveAction)
+        XCTAssertEqual(presentation.iconSystemName, "folder")
+        XCTAssertEqual(presentation.helpText, project.path)
+    }
+
+    func testStaleProjectSidebarPresentationShowsUnavailableStateAndSafeRemoveCopy() {
+        let project = staleProject(id: "missing", name: "Missing")
+
+        let presentation = SidebarProjectRowPresentation(project: project)
+
+        XCTAssertTrue(presentation.isStale)
+        XCTAssertEqual(presentation.metadataText, "Unavailable")
+        XCTAssertTrue(presentation.showsRemoveAction)
+        XCTAssertEqual(presentation.iconSystemName, "folder.badge.questionmark")
+        XCTAssertEqual(presentation.removeActionTitle, "Remove from app")
+        XCTAssertTrue(presentation.removeActionHelp.contains("Files on disk are not deleted"))
+    }
+
+    func testSessionSidebarPresentationIncludesMetadataAndResumability() throws {
+        let project = try availableProject(id: "project", name: "Repo")
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let session = storedSession(
+            id: "session",
+            project: project,
+            title: "Continue feature",
+            status: "Ready",
+            updatedAt: now.addingTimeInterval(-300)
+        )
+
+        let presentation = SidebarSessionRowPresentation(session: session, project: project, now: now)
+
+        XCTAssertEqual(presentation.title, "Continue feature")
+        XCTAssertEqual(presentation.statusText, "Ready")
+        XCTAssertEqual(presentation.updatedAtText, "Updated 5m ago")
+        XCTAssertEqual(presentation.resumabilityText, "Resumable")
+        XCTAssertEqual(presentation.resumabilitySystemImage, "arrow.clockwise.circle")
+        XCTAssertTrue(presentation.isEnabled)
+    }
+
+    func testNonResumableSessionPresentationIsDistinguishable() throws {
+        let project = try availableProject(id: "project", name: "Repo")
+        var session = storedSession(id: "session", project: project)
+        session.piSessionID = nil
+
+        let presentation = SidebarSessionRowPresentation(
+            session: session,
+            project: project,
+            now: session.updatedAt.addingTimeInterval(30)
+        )
+
+        XCTAssertEqual(presentation.resumabilityText, "Not resumable")
+        XCTAssertEqual(presentation.resumabilitySystemImage, "exclamationmark.circle")
+        XCTAssertTrue(presentation.accessibilityLabel.contains("Not resumable"))
+    }
+
+    func testSessionSidebarPresentationFallsBackForBlankTitleAndStatus() throws {
+        let project = try availableProject(id: "project", name: "Repo")
+        let session = storedSession(
+            id: "session",
+            project: project,
+            title: "   ",
+            status: "   "
+        )
+
+        let presentation = SidebarSessionRowPresentation(
+            session: session,
+            project: project,
+            now: session.updatedAt.addingTimeInterval(30)
+        )
+
+        XCTAssertEqual(presentation.title, "Untitled session")
+        XCTAssertEqual(presentation.statusText, "Unknown")
+    }
+
+    func testSessionUpdatedAtPresentationUsesDenseRelativeBucketsAndShortDate() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+        XCTAssertEqual(
+            SidebarSessionRowPresentation.updatedAtText(for: now.addingTimeInterval(15), now: now),
+            "Updated just now"
+        )
+        XCTAssertEqual(
+            SidebarSessionRowPresentation.updatedAtText(for: now.addingTimeInterval(-7_200), now: now),
+            "Updated 2h ago"
+        )
+        XCTAssertEqual(
+            SidebarSessionRowPresentation.updatedAtText(for: now.addingTimeInterval(-172_800), now: now),
+            "Updated 2d ago"
+        )
+        XCTAssertEqual(
+            SidebarSessionRowPresentation.updatedAtText(for: Date(timeIntervalSince1970: 0), now: now),
+            "Updated 1/1/70"
+        )
+    }
+
+    func testStaleProjectSessionPresentationIsDisabledForSidebarSwitching() {
+        let project = staleProject(id: "missing", name: "Missing")
+        let session = storedSession(id: "session", project: project)
+
+        let presentation = SidebarSessionRowPresentation(
+            session: session,
+            project: project,
+            now: session.updatedAt.addingTimeInterval(30)
+        )
+
+        XCTAssertFalse(presentation.isEnabled)
+        XCTAssertTrue(presentation.helpText.contains("Project unavailable"))
+    }
+
+    func testSidebarStaleRemoveActionCallsAppModelRemovalBehavior() {
+        let project = staleProject(id: "missing", name: "Missing")
+        let session = storedSession(id: "session", project: project)
+        SessionStore.save(AppPersistedState(
+            projects: [project],
+            sessions: [session],
+            selectedProjectID: project.id,
+            selectedSessionID: session.id
+        ))
+        let model = AppModel()
+
+        model.removeSidebarStaleProject(project)
+
+        XCTAssertTrue(model.projects.isEmpty)
+        XCTAssertTrue(model.sessions.isEmpty)
+        XCTAssertNil(model.selectedProjectID)
+        XCTAssertNil(model.selectedSessionID)
+    }
+
+    func testSidebarSessionSwitchForStaleProjectDoesNotRestoreOrStartSession() {
+        let project = staleProject(id: "missing", name: "Missing")
+        let session = storedSession(id: "session", project: project)
+        let model = AppModel()
+        model.projects = [project]
+        model.sessions = [session]
+        model.statusText = "Ready"
+
+        model.switchSidebarSession(session, in: project)
+
+        XCTAssertNil(model.selectedProjectID)
+        XCTAssertNil(model.selectedSessionID)
+        XCTAssertFalse(model.isConnected)
+        XCTAssertEqual(model.sessionTitle, "New chat")
+        XCTAssertEqual(model.statusText, "Project unavailable")
+    }
+
     private func makeSessionNavigationFixture(
         selectedSessionID: StoredSession.ID
     ) -> (model: AppModel, project: ProjectItem, sessions: [StoredSession]) {
@@ -100,6 +270,8 @@ final class HeaderActionTests: XCTestCase {
         let sessions = [
             StoredSession(
                 id: "oldest",
+                piSessionID: "pi-oldest",
+                projectID: project.id,
                 projectPath: project.path,
                 projectName: project.name,
                 title: "Oldest",
@@ -109,6 +281,8 @@ final class HeaderActionTests: XCTestCase {
             ),
             StoredSession(
                 id: "middle",
+                piSessionID: "pi-middle",
+                projectID: project.id,
                 projectPath: project.path,
                 projectName: project.name,
                 title: "Middle",
@@ -118,6 +292,8 @@ final class HeaderActionTests: XCTestCase {
             ),
             StoredSession(
                 id: "newest",
+                piSessionID: "pi-newest",
+                projectID: project.id,
                 projectPath: project.path,
                 projectName: project.name,
                 title: "Newest",
@@ -127,6 +303,8 @@ final class HeaderActionTests: XCTestCase {
             ),
             StoredSession(
                 id: "other-project-newest",
+                piSessionID: "pi-other-project-newest",
+                projectID: otherProject.id,
                 projectPath: otherProject.path,
                 projectName: otherProject.name,
                 title: "Other Project Newest",
@@ -146,5 +324,47 @@ final class HeaderActionTests: XCTestCase {
         model.isConnected = true
 
         return (model, project, sessions)
+    }
+
+    private func availableProject(id: ProjectItem.ID, name: String) throws -> ProjectItem {
+        let directory = temporaryDirectoryURL().appendingPathComponent(name, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return ProjectItem(id: id, name: name, path: directory.path)
+    }
+
+    private func staleProject(id: ProjectItem.ID, name: String) -> ProjectItem {
+        ProjectItem(id: id, name: name, path: temporaryDirectoryURL().appendingPathComponent(name).path)
+    }
+
+    private func storedSession(
+        id: StoredSession.ID,
+        project: ProjectItem,
+        title: String? = nil,
+        status: String = "Ready",
+        updatedAt: Date = Date(timeIntervalSince1970: 1_800_000_000)
+    ) -> StoredSession {
+        StoredSession(
+            id: id,
+            piSessionID: "pi-\(id)",
+            projectID: project.id,
+            projectPath: project.path,
+            projectName: project.name,
+            title: title ?? id,
+            status: status,
+            sessionFile: URL(fileURLWithPath: project.path).appendingPathComponent("\(id).json").path,
+            updatedAt: updatedAt
+        )
+    }
+
+    private func temporaryDatabaseURL() -> URL {
+        temporaryDirectoryURL().appendingPathComponent("sessions.sqlite")
+    }
+
+    private func temporaryDirectoryURL() -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HeaderActionTests-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        temporaryURLs.append(url)
+        return url
     }
 }

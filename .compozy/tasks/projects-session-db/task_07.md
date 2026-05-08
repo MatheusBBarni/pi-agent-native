@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Update Settings Diagnostics for SQLite State Path
 type: frontend
 complexity: low
@@ -28,10 +28,10 @@ This task updates settings diagnostics so the app reports the new SQLite state f
 </requirements>
 
 ## Subtasks
-- [ ] 7.1 Update settings store diagnostic naming for the project/session DB.
-- [ ] 7.2 Update settings sheet display label.
-- [ ] 7.3 Add or update tests for diagnostic path value.
-- [ ] 7.4 Confirm existing settings diagnostics still render expected values.
+- [x] 7.1 Update settings store diagnostic naming for the project/session DB.
+- [x] 7.2 Update settings sheet display label.
+- [x] 7.3 Add or update tests for diagnostic path value.
+- [x] 7.4 Confirm existing settings diagnostics still render expected values.
 
 ## Implementation Details
 Modify `Sources/PiAgentNative/Settings/SettingsStore.swift` and `Sources/PiAgentNative/SettingsSheetView.swift`. This task depends only on the DB URL from task 01 and should not alter persistence behavior.
@@ -55,11 +55,11 @@ Modify `Sources/PiAgentNative/Settings/SettingsStore.swift` and `Sources/PiAgent
 
 ## Tests
 - Unit tests:
-  - [ ] Settings store exposes a path ending in the SQLite database filename.
-  - [ ] Settings store no longer exposes a JSON-specific sessions path label or property name where tests assert it.
-  - [ ] Auth directory path remains unchanged.
+  - [x] Settings store exposes a path ending in the SQLite database filename.
+  - [x] Settings store no longer exposes a JSON-specific sessions path label or property name where tests assert it.
+  - [x] Auth directory path remains unchanged.
 - Integration tests:
-  - [ ] Settings sheet renders the project/session state path without changing launch diagnostics.
+  - [x] Settings sheet renders the project/session state path without changing launch diagnostics.
 - Test coverage target: >=80%
 - All tests must pass
 

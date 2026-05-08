@@ -172,7 +172,7 @@ final class PiRPCEventReducerTests: XCTestCase {
             position: 0
         )
 
-        XCTAssertEqual(entry.summary(maxLength: 12), "This queue...")
+        XCTAssertEqual(entry.summary(maxLength: 12), "This queu...")
         XCTAssertEqual(entry.summary(maxLength: 3), entry.summary)
     }
 }

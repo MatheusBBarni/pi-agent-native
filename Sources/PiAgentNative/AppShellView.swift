@@ -113,7 +113,7 @@ public struct AppShellView: View {
         .background(WindowConfigurator())
         .background(WindowKeyboardHandler(model: model))
         .onAppear {
-            if !model.isConnected, model.selectedProject != nil {
+            if !model.isConnected, model.selectedProject?.isAvailable == true {
                 model.start()
             }
         }
@@ -422,6 +422,10 @@ struct ProjectSidebarRow: View {
     @EnvironmentObject private var model: AppModel
     let project: ProjectItem
 
+    private var presentation: SidebarProjectRowPresentation {
+        SidebarProjectRowPresentation(project: project)
+    }
+
     private var isSelected: Bool {
         project.id == model.selectedProjectID
     }
@@ -432,36 +436,83 @@ struct ProjectSidebarRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Button {
-                model.toggleProject(project)
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "folder")
-                        .uiFont(size: 14)
-                        .frame(width: 18)
-                    Text(project.name)
-                        .lineLimit(1)
+            HStack(alignment: .top, spacing: 6) {
+                Button {
+                    model.toggleProject(project)
+                } label: {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: presentation.iconSystemName)
+                            .uiFont(size: 14)
+                            .frame(width: 18)
+                            .foregroundStyle(presentation.isStale ? Theme.red : Theme.secondaryText)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(presentation.title)
+                                .uiFont(size: 14, weight: .medium)
+                                .foregroundStyle(presentation.isStale ? Theme.secondaryText : Theme.primaryText)
+                                .lineLimit(1)
+
+                            if let metadataText = presentation.metadataText {
+                                Text(metadataText)
+                                    .uiFont(size: 11, weight: .medium)
+                                    .foregroundStyle(Theme.tertiaryText)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, presentation.isStale ? 7 : 9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(isSelected ? Theme.sidebarSelection : Color.clear)
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 9)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(isSelected ? Theme.sidebarSelection : Color.clear)
-                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .buttonStyle(.plain)
+                .accessibilityLabel(presentation.accessibilityLabel)
+                .help(presentation.helpText)
+
+                if presentation.showsRemoveAction {
+                    Button {
+                        model.removeSidebarStaleProject(project)
+                    } label: {
+                        Text(presentation.removeActionTitle)
+                            .uiFont(size: 11, weight: .medium)
+                            .lineLimit(1)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 5)
+                            .background(Theme.elevatedBackground.opacity(0.75))
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.secondaryText)
+                    .help(presentation.removeActionHelp)
+                    .accessibilityLabel(presentation.removeActionTitle)
+                    .accessibilityHint(presentation.removeActionHelp)
+                    .padding(.top, 5)
+                }
             }
-            .buttonStyle(.plain)
 
             if isExpanded {
                 ForEach(model.sessionsForProject(project)) { session in
-                    Button {
-                        model.switchSession(session)
-                    } label: {
+                    if project.isAvailable {
+                        Button {
+                            model.switchSidebarSession(session, in: project)
+                        } label: {
+                            SidebarSessionRow(
+                                session: session,
+                                project: project,
+                                isSelected: session.id == model.selectedSessionID
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.leading, 28)
+                    } else {
                         SidebarSessionRow(
-                            title: session.title,
+                            session: session,
+                            project: project,
                             isSelected: session.id == model.selectedSessionID
                         )
+                        .padding(.leading, 28)
                     }
-                    .buttonStyle(.plain)
-                    .padding(.leading, 28)
                 }
             }
         }
@@ -713,21 +764,44 @@ struct WindowKeyboardHandler: NSViewRepresentable {
 }
 
 struct SidebarSessionRow: View {
-    let title: String
+    let session: StoredSession
+    let project: ProjectItem
     let isSelected: Bool
 
+    private var presentation: SidebarSessionRowPresentation {
+        SidebarSessionRowPresentation(session: session, project: project)
+    }
+
     var body: some View {
-        Text(title)
-            .uiFont(size: 14, weight: .medium)
-            .foregroundStyle(Theme.primaryText)
-            .lineLimit(1)
+        VStack(alignment: .leading, spacing: 2) {
+            Text(presentation.title)
+                .uiFont(size: 13, weight: .medium)
+                .foregroundStyle(presentation.isEnabled ? Theme.primaryText : Theme.secondaryText)
+                .lineLimit(1)
+
+            HStack(spacing: 5) {
+                Text(presentation.statusText)
+                    .lineLimit(1)
+                Text(presentation.updatedAtText)
+                    .lineLimit(1)
+                Label(presentation.resumabilityText, systemImage: presentation.resumabilitySystemImage)
+                    .labelStyle(.titleAndIcon)
+                    .lineLimit(1)
+            }
+            .uiFont(size: 11)
+            .foregroundStyle(Theme.tertiaryText)
+        }
         .padding(.horizontal, 10)
-        .padding(.vertical, 9)
+        .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(isSelected ? Theme.sidebarSelection : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .opacity(presentation.isEnabled ? 1 : 0.68)
+        .accessibilityLabel(presentation.accessibilityLabel)
+        .help(presentation.helpText)
     }
 }
+
 #Preview("App Shell") {
     AppShellView()
         .environmentObject(previewAppModel())
@@ -740,6 +814,8 @@ private func previewAppModel() -> AppModel {
     let project = ProjectItem(name: "pi-agent-native", path: "/Users/matheusbbarni/projects/pi-agent-native")
     let session = StoredSession(
         id: "preview-session",
+        piSessionID: "pi-preview-session",
+        projectID: project.id,
         projectPath: project.path,
         projectName: project.name,
         title: "Review window preview",

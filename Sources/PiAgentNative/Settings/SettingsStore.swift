@@ -20,7 +20,7 @@ final class SettingsStore: ObservableObject {
         PiLaunchResolver.resolve(customExecutable: customExecutablePath)
     }
 
-    var sessionStorePath: String {
+    var projectSessionStorePath: String {
         SessionStore.storeURL.path
     }
 
@@ -37,5 +37,33 @@ final class SettingsStore: ObservableObject {
             return "Executable path is valid"
         }
         return "Path is not currently executable"
+    }
+}
+
+struct SettingsDiagnosticItem: Equatable, Identifiable {
+    let title: String
+    let value: String
+
+    var id: String { title }
+}
+
+@MainActor
+struct SettingsDiagnosticsPresentation: Equatable {
+    let launchDiagnostics: [SettingsDiagnosticItem]
+    let stateDiagnostics: [SettingsDiagnosticItem]
+
+    init(settingsStore: SettingsStore) {
+        launchDiagnostics = [
+            SettingsDiagnosticItem(title: "Validation", value: settingsStore.executableValidationMessage),
+            SettingsDiagnosticItem(title: "PI_MONO_PATH", value: settingsStore.piMonoPath),
+            SettingsDiagnosticItem(
+                title: "Resolved command",
+                value: "\(settingsStore.resolvedLaunchPreview.diagnostic) --mode rpc"
+            )
+        ]
+        stateDiagnostics = [
+            SettingsDiagnosticItem(title: "Project/session DB", value: settingsStore.projectSessionStorePath),
+            SettingsDiagnosticItem(title: "Auth", value: settingsStore.authDirectoryPath)
+        ]
     }
 }

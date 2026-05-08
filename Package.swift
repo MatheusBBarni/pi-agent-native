@@ -19,7 +19,10 @@ let package = Package(
             dependencies: [
                 .product(name: "MarkdownUI", package: "swift-markdown-ui")
             ],
-            path: "Sources/PiAgentNative"
+            path: "Sources/PiAgentNative",
+            linkerSettings: [
+                .linkedLibrary("sqlite3")
+            ]
         ),
         .executableTarget(
             name: "PiAgentNativeExecutable",

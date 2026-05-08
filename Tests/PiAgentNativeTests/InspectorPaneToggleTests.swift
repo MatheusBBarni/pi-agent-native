@@ -53,6 +53,8 @@ final class InspectorPaneToggleTests: XCTestCase {
         let project = ProjectItem(id: "project-1", name: "Repo", path: "/tmp/repo")
         let session = StoredSession(
             id: "session-1",
+            piSessionID: "pi-session-1",
+            projectID: project.id,
             projectPath: project.path,
             projectName: project.name,
             title: "Build UI",
@@ -128,6 +130,8 @@ final class InspectorPaneToggleTests: XCTestCase {
         let projectB = ProjectItem(id: "project-b", name: "B", path: "/tmp/b")
         let sessionA = StoredSession(
             id: "session-a",
+            piSessionID: "pi-session-a",
+            projectID: projectA.id,
             projectPath: projectA.path,
             projectName: projectA.name,
             title: "A session",
@@ -137,6 +141,8 @@ final class InspectorPaneToggleTests: XCTestCase {
         )
         let sessionB = StoredSession(
             id: "session-b",
+            piSessionID: "pi-session-b",
+            projectID: projectB.id,
             projectPath: projectB.path,
             projectName: projectB.name,
             title: "B session",
@@ -163,6 +169,8 @@ final class InspectorPaneToggleTests: XCTestCase {
         let project = ProjectItem(id: "project-1", name: "Repo", path: "/tmp/repo")
         let session = StoredSession(
             id: "session-1",
+            piSessionID: "pi-session-1",
+            projectID: project.id,
             projectPath: project.path,
             projectName: project.name,
             title: "Build UI",
@@ -173,14 +181,14 @@ final class InspectorPaneToggleTests: XCTestCase {
         let state = AppPersistedState(
             projects: [project],
             sessions: [session],
-            selectedProjectPath: project.path,
+            selectedProjectID: project.id,
             selectedSessionID: session.id
         )
 
         let data = try JSONEncoder().encode(state)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
 
-        XCTAssertEqual(Set(object.keys), Set(["projects", "sessions", "selectedProjectPath", "selectedSessionID"]))
+        XCTAssertEqual(Set(object.keys), Set(["projects", "sessions", "selectedProjectID", "selectedSessionID"]))
         XCTAssertNil(object["isInspectorVisible"])
     }
 }

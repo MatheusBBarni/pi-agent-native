@@ -90,16 +90,42 @@ struct ProjectItem: Identifiable, Equatable, Codable {
     var id = UUID().uuidString
     var name: String
     var path: String
+
+    var availability: ProjectAvailability {
+        ProjectAvailability(path: path)
+    }
+
+    var isAvailable: Bool {
+        availability == .available
+    }
+}
+
+enum ProjectAvailability: Equatable {
+    case available
+    case stale
+
+    init(path: String, fileManager: FileManager = .default) {
+        var isDirectory: ObjCBool = false
+        let exists = fileManager.fileExists(atPath: path, isDirectory: &isDirectory)
+        self = exists && isDirectory.boolValue ? .available : .stale
+    }
 }
 
 struct StoredSession: Identifiable, Equatable, Codable {
     var id: String
+    var piSessionID: String?
+    var projectID: String
     var projectPath: String
     var projectName: String
     var title: String
     var status: String
     var sessionFile: String
     var updatedAt: Date
+
+    var isResumable: Bool {
+        guard let piSessionID else { return false }
+        return !piSessionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 }
 
 struct GitBranchDetails: Equatable {

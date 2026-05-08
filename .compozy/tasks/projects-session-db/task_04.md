@@ -1,10 +1,10 @@
 ---
-status: pending
+status: completed
 title: Wire AppModel Restore and Persistence Semantics
 type: refactor
 complexity: high
 dependencies:
-  - task_03
+    - task_03
 ---
 
 # Task 4: Wire AppModel Restore and Persistence Semantics
@@ -29,11 +29,11 @@ This task updates app startup and save behavior to use the SQLite-backed model s
 </requirements>
 
 ## Subtasks
-- [ ] 4.1 Update `AppModel` hydration to use selected project id.
-- [ ] 4.2 Replace silent persisted-project dropping with normalization that preserves stale records.
-- [ ] 4.3 Update persistence saves to write the new state shape.
-- [ ] 4.4 Update session upsert and selection comparisons for local/Pi id separation.
-- [ ] 4.5 Add app-model tests for restore and save semantics.
+- [x] 4.1 Update `AppModel` hydration to use selected project id.
+- [x] 4.2 Replace silent persisted-project dropping with normalization that preserves stale records.
+- [x] 4.3 Update persistence saves to write the new state shape.
+- [x] 4.4 Update session upsert and selection comparisons for local/Pi id separation.
+- [x] 4.5 Add app-model tests for restore and save semantics.
 
 ## Implementation Details
 Modify `Sources/PiAgentNative/AppModel.swift`. Add or extend tests in `Tests/PiAgentNativeTests/ProjectSessionPersistenceTests.swift` or the closest existing AppModel test file. The current `sanitizePersistedProjects` behavior is a key conflict with the PRD and TechSpec.
@@ -61,13 +61,13 @@ Modify `Sources/PiAgentNative/AppModel.swift`. Add or extend tests in `Tests/PiA
 
 ## Tests
 - Unit tests:
-  - [ ] Startup with stored available project restores project and selected session.
-  - [ ] Startup with stored unavailable project keeps the project record in memory.
-  - [ ] Persisting selected context writes selected project id and selected session id.
-  - [ ] Session upsert stores Pi RPC session id separately from native selected session id.
+  - [x] Startup with stored available project restores project and selected session.
+  - [x] Startup with stored unavailable project keeps the project record in memory.
+  - [x] Persisting selected context writes selected project id and selected session id.
+  - [x] Session upsert stores Pi RPC session id separately from native selected session id.
 - Integration tests:
-  - [ ] Existing session navigation tests pass after identity split.
-  - [ ] AppModel initialization with temporary store does not touch the real application support database.
+  - [x] Existing session navigation tests pass after identity split.
+  - [x] AppModel initialization with temporary store does not touch the real application support database.
 - Test coverage target: >=80%
 - All tests must pass
 

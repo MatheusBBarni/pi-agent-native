@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Update Project and Session Domain Models
 type: refactor
 complexity: medium
@@ -29,11 +29,11 @@ This task updates the app's domain model so local session identity is separate f
 </requirements>
 
 ## Subtasks
-- [ ] 2.1 Add Pi RPC session id metadata to `StoredSession`.
-- [ ] 2.2 Add project relationship fields needed by the TechSpec.
-- [ ] 2.3 Update session construction sites in tests and previews.
-- [ ] 2.4 Update session index helpers to remain source-compatible where possible.
-- [ ] 2.5 Add model tests for local id and Pi RPC id separation.
+- [x] 2.1 Add Pi RPC session id metadata to `StoredSession`.
+- [x] 2.2 Add project relationship fields needed by the TechSpec.
+- [x] 2.3 Update session construction sites in tests and previews.
+- [x] 2.4 Update session index helpers to remain source-compatible where possible.
+- [x] 2.5 Add model tests for local id and Pi RPC id separation.
 
 ## Implementation Details
 Modify `Sources/PiAgentNative/Models.swift` and `Sources/PiAgentNative/Sessions/NativeSessionIndexStore.swift`. Update construction sites in existing tests and previews. See TechSpec "Data Models" for required fields and ADR-004 for the selected identity semantics.
@@ -62,12 +62,12 @@ Modify `Sources/PiAgentNative/Models.swift` and `Sources/PiAgentNative/Sessions/
 
 ## Tests
 - Unit tests:
-  - [ ] Session created with local id and Pi RPC id preserves both values.
-  - [ ] Session without Pi RPC id is represented as non-resumable by helper logic added in this task or a documented placeholder for task 05.
-  - [ ] Session index ordering still sorts by running state and `updatedAt`.
+  - [x] Session created with local id and Pi RPC id preserves both values.
+  - [x] Session without Pi RPC id is represented as non-resumable by helper logic added in this task or a documented placeholder for task 05.
+  - [x] Session index ordering still sorts by running state and `updatedAt`.
 - Integration tests:
-  - [ ] `HeaderActionTests` continue to pass with the updated model.
-  - [ ] Existing previews/test fixtures compile with the new initializer shape.
+  - [x] `HeaderActionTests` continue to pass with the updated model.
+  - [x] Existing previews/test fixtures compile with the new initializer shape.
 - Test coverage target: >=80%
 - All tests must pass
 
