@@ -4,9 +4,21 @@ import XCTest
 
 final class ProjectSessionPersistenceTests: XCTestCase {
     private var temporaryURLs: [URL] = []
+    private var originalCustomExecutablePath: String?
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        originalCustomExecutablePath = UserDefaults.standard.string(forKey: "customExecutablePath")
+    }
 
     override func tearDownWithError() throws {
         SessionStore.databaseURLForTesting = nil
+        if let originalCustomExecutablePath {
+            UserDefaults.standard.set(originalCustomExecutablePath, forKey: "customExecutablePath")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "customExecutablePath")
+        }
+        originalCustomExecutablePath = nil
 
         for url in temporaryURLs {
             try? FileManager.default.removeItem(at: url)
@@ -253,6 +265,52 @@ final class ProjectSessionPersistenceTests: XCTestCase {
         XCTAssertTrue(persistedState.sessions.isEmpty)
         XCTAssertNil(persistedState.selectedProjectID)
         XCTAssertNil(persistedState.selectedSessionID)
+    }
+
+    @MainActor
+    func testRemovingSelectedStaleProjectStopsRunningRPCProcess() throws {
+        let databaseURL = temporaryDatabaseURL()
+        SessionStore.databaseURLForTesting = databaseURL
+        let root = temporaryDirectoryURL()
+        let projectDirectory = root.appendingPathComponent("Repo", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDirectory, withIntermediateDirectories: true)
+        let executableURL = root.appendingPathComponent("fake-pi-rpc.sh")
+        try Data("""
+        #!/bin/sh
+        trap 'exit 0' TERM
+        while true; do
+          sleep 1
+        done
+        """.utf8).write(to: executableURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path)
+
+        let project = ProjectItem(id: "project-1", name: "Repo", path: projectDirectory.path)
+        SessionStore.save(AppPersistedState(
+            projects: [project],
+            sessions: [],
+            selectedProjectID: project.id,
+            selectedSessionID: nil
+        ))
+        let model = AppModel()
+        model.customExecutablePath = executableURL.path
+
+        model.start()
+        let client = try rpcClient(from: model)
+        XCTAssertTrue(model.isConnected)
+        XCTAssertTrue(client.isRunning)
+
+        try FileManager.default.removeItem(at: projectDirectory)
+        XCTAssertEqual(project.availability, .stale)
+
+        model.removeStaleProject(project)
+
+        XCTAssertFalse(model.isConnected)
+        XCTAssertFalse(model.isStreaming)
+        XCTAssertFalse(client.isRunning)
+        XCTAssertTrue(model.projects.isEmpty)
+        XCTAssertNil(model.selectedProjectID)
+        XCTAssertEqual(model.workspacePath, "")
+        XCTAssertEqual(model.statusText, "Open a project")
     }
 
     @MainActor

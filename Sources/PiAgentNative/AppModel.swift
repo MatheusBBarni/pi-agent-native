@@ -1461,11 +1461,15 @@ public final class AppModel: ObservableObject {
 
     func removeLocalProjectRecord(_ project: ProjectItem) {
         let wasSelectedProject = selectedProjectID == project.id
+        let wasConnectedToRemovedProject = wasSelectedProject && isConnected
         guard let removedProject = workspaceStore.removeProject(id: project.id) else { return }
 
         sessionIndexStore.removeSessions(forProjectID: removedProject.id)
 
         if wasSelectedProject {
+            if wasConnectedToRemovedProject {
+                stop()
+            }
             resetMentionContext(invalidateProjectAt: removedProject.path)
             conversationStore.clear()
             toolActivityStore.clear()
@@ -1475,7 +1479,7 @@ public final class AppModel: ObservableObject {
             isCreatingNewSession = false
             isSwitchingSession = false
             pendingPromptAfterNewSession = nil
-            clearSkillSelectionState(clearAvailableSkills: isConnected)
+            clearSkillSelectionState(clearAvailableSkills: wasConnectedToRemovedProject)
         }
 
         appendLog(title: "removed project record", detail: "projectID=\(removedProject.id) path=\(removedProject.path)")
