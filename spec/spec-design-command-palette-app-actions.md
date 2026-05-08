@@ -110,6 +110,15 @@ Out of scope:
 - **REQ-043**: Running Send prompt from the palette shall use the existing Send prompt App Action availability and dispatch path.
 - **REQ-044**: Running Stop generation from the palette shall use the existing Stop generation App Action availability and dispatch path.
 - **REQ-045**: Palette filtering and dispatch shall be testable without rendering the full SwiftUI shell.
+- **REQ-046**: The open-palette App Action shall be added to `AppActionID.allCases` and `DefaultKeymap.definitions` together so the existing `testEveryAppActionAppearsInDefaultKeymap` invariant remains true.
+- **REQ-047**: If Login and Select model remain user-runnable shell actions in the first implementation, the palette shall include them either as new Static Palette Items backed by explicit App Actions or as parameterized/shared AppModel invocations; the implementation shall not leave those existing shell controls undiscoverable without a documented reason.
+- **REQ-048**: The implementation shall define whether `isShowingCommandPalette` participates in `hasActiveModal`. If it does, `runCommandPaletteItem(_:)` must close the palette before calling `canPerformAppAction(_:)` through `performAppAction(_:)`. If it does not, the rest of the shell must still be disabled or otherwise protected while the palette is open.
+- **REQ-049**: Palette dispatch shall resolve stored invocation IDs back to current app state at run time. If the referenced project, session, model, or external target no longer exists, the item shall become disabled or the run shall no-op with a concise unavailable reason; it must not dispatch against stale state.
+- **REQ-050**: Session Palette Items shall use the same ordered current-project session list as the sidebar, including running-session priority and `updatedAt` ordering.
+- **REQ-051**: Project Palette Items shall use the persisted project list order from `WorkspaceStore.projects`.
+- **REQ-052**: Model Palette Items shall be generated only from `availableModels`; if `availableModels` is empty, model rows shall be omitted in the first implementation.
+- **REQ-053**: External Target Palette Items shall be generated only from `availableExternalTargets` and only when a Selected Project exists.
+- **REQ-054**: Command-K shall be registered through the Default Keymap and the app `Commands` menu path; the existing Escape-only local keyboard monitor shall not become a second broad keybinding dispatcher unless a concrete focus bug requires it.
 - **CON-001**: The Command Palette must not execute arbitrary shell commands.
 - **CON-002**: The Command Palette must not replace Composer Slash Commands.
 - **CON-003**: The Command Palette must not replace Keybinding Help.
@@ -135,6 +144,13 @@ enum AppActionID: String, CaseIterable {
 ```
 
 `openCommandPalette` shall have a Command-K App-Wide Keybinding in the Default Keymap and shall appear in Keybinding Help. It should be grouped with shell actions.
+
+The implementation must update the existing keymap tests when adding this action:
+
+- Add a Command-K assertion to `testDefaultKeymapHasExpectedDisplayLabels`.
+- Keep `testDefaultKeymapHasNoUnexpectedConflicts` passing.
+- Keep `testEveryAppActionAppearsInDefaultKeymap` passing by adding the keybinding in the same change as the enum case.
+- Confirm Command-K is not already used by any focused or app-wide keybinding.
 
 ### Palette Item Contract
 
@@ -169,6 +185,8 @@ enum CommandPaletteInvocation: Equatable {
 
 Exact names may differ, but the implementation must preserve these fields and dispatch categories.
 
+The invocation payload should store stable identifiers, not whole mutable state objects. Dispatch must look up the current `ProjectItem`, `StoredSession`, `PiModel`, or `AvailableExternalTarget` immediately before running so stale palette rows cannot select deleted or outdated state.
+
 ### Palette State Contract
 
 The app should hold state equivalent to:
@@ -196,6 +214,10 @@ func runCommandPaletteItem(_ item: CommandPaletteItem)
 
 Names may differ, but the behavior is required.
 
+`showCommandPalette()` must refuse to open while any existing modal is active. The command palette may be modeled as an active modal after it is open, but the implementation must avoid the self-blocking dispatch bug by closing only the command palette before running the selected item.
+
+The implementation should expose either a `hasActiveModalExcludingCommandPalette` predicate or an equivalent helper used only for opening the palette. `hasActiveModal` may include the Command Palette so the background shell is disabled while the overlay is open.
+
 ### Required First-Version Items
 
 | Item type | Example title | Dispatch |
@@ -211,11 +233,16 @@ Names may differ, but the behavior is required.
 | Static App Action | Toggle inspector | `performAppAction(.toggleInspector)` |
 | Static App Action | Send prompt | `performAppAction(.sendPrompt)` |
 | Static App Action | Stop generation | `performAppAction(.stopGeneration)` |
+| Static App Action or shared invocation | Login | Existing login presentation path, preferably through a new `AppActionID` if promoted to shared shell action |
+| Static App Action or shared invocation | Select model | Existing `showModelPicker()` path, preferably through a new `AppActionID` if promoted to shared shell action |
+| Static App Action | Cycle thinking level | `performAppAction(.cycleThinkingLevel)` when included as a static action |
 | Project | Switch project: `{project.name}` | `selectProject(project)` or the existing project-selection equivalent |
-| Session | Switch session: `{session.title}` | `switchSession(session)` |
+| Session | Switch session: `{session.title}` | `switchSession(session)` after sourcing rows from `sessionsForProject(selectedProject)` |
 | Model | Select model: `{provider}/{modelID}` | `selectModel(model)` |
 | Thinking level | Set thinking: `{level}` | `setThinkingLevel(level)` |
 | External target | Open externally: `{target.displayName}` | `openExternally(target)` |
+
+The engineer may defer Login, Select model, and Cycle thinking level only if the issue handoff explicitly records why those existing shell controls are excluded from the first palette slice.
 
 ### Filtering Contract
 
@@ -234,11 +261,15 @@ Running a Palette Item shall:
 
 1. Confirm the item is enabled.
 2. Capture the invocation payload.
-3. Close only the Command Palette.
-4. Dispatch the captured invocation through the shared AppModel path.
-5. Leave composer text unchanged unless the selected action itself is the existing Send prompt action and its normal dispatch sends and clears the prompt.
+3. Resolve the invocation payload against current app state.
+4. If resolution fails, do not dispatch and surface a concise unavailable reason.
+5. Close only the Command Palette.
+6. Dispatch the resolved invocation through the shared AppModel path.
+7. Leave composer text unchanged unless the selected action itself is the existing Send prompt action and its normal dispatch sends and clears the prompt.
 
 This order is required because `canPerformAppAction(_:)` blocks non-modal actions while a modal is active. The Command Palette must not block its own selected action after the user chooses an enabled item.
+
+If `isShowingCommandPalette` is included in `hasActiveModal`, `runCommandPaletteItem(_:)` must close the palette before the call to `performAppAction(_:)`. If it is excluded from `hasActiveModal`, the SwiftUI shell must still block pointer/key interaction outside the palette while the palette is open.
 
 ## 5. Acceptance Criteria
 
@@ -262,13 +293,19 @@ This order is required because `canPerformAppAction(_:)` blocks non-modal action
 - **AC-018**: Given a Mention Picker or Skill Picker would otherwise be active in the composer, When the Command Palette opens, Then palette input is separate and picker submission/completion does not run.
 - **AC-019**: Given the Command Palette is closed, When the user types `/skill:` or `@` in the composer, Then existing Skill Picker and Mention Picker behavior is unchanged.
 - **AC-020**: Given the Command Palette is implemented, Then tests cover filtering, enabled-state behavior, and dispatch through the shared App Action or AppModel paths.
+- **AC-021**: Given `openCommandPalette` is added to `AppActionID`, Then the Default Keymap includes exactly one Command-K binding for it and the every-action-mapped keymap test passes.
+- **AC-022**: Given a parameterized Palette Item references state that is removed before dispatch, When the user attempts to run it, Then no stale project, session, model, or external target action is dispatched.
+- **AC-023**: Given the Command Palette is included in active modal state, When an enabled Static Palette Item is run, Then the palette closes before `performAppAction(_:)` checks availability.
+- **AC-024**: Given the Command Palette is already open, When Command-K is pressed again, Then no second palette is stacked and composer text remains unchanged.
+- **AC-025**: Given the sidebar would list sessions in running-session-first, newest-first order, When the Command Palette lists session Palette Items, Then their source order matches the sidebar before query ranking is applied.
+- **AC-026**: Given there are no `availableModels`, When the Command Palette opens, Then no model Palette Items are shown.
 
 ## 6. Test Automation Strategy
 
 - **Test Levels**: Unit tests for item construction, filtering, availability, and dispatch; focused AppModel tests for modal interaction; manual UI smoke tests for keyboard navigation and focus.
 - **Frameworks**: Swift XCTest in existing SwiftPM test targets.
 - **Test Data Management**: Use seeded `AppModel` instances with projects, sessions, available models, external targets, selected project state, active modal state, streaming state, and composer text.
-- **Coverage Requirements**: Tests must cover Command-K action metadata, query filtering order, disabled item non-dispatch, opening blocked by active modal, closing the palette before dispatch, static App Action dispatch, project selection dispatch, session switching dispatch, model selection dispatch, thinking-level dispatch, and composer text preservation.
+- **Coverage Requirements**: Tests must cover Command-K action metadata, Default Keymap all-action coverage, query filtering order, disabled item non-dispatch, stale parameterized invocation non-dispatch, opening blocked by active modal, closing the palette before dispatch, static App Action dispatch, project selection dispatch, session switching dispatch, model selection dispatch, thinking-level dispatch, and composer text preservation.
 - **Performance Testing**: No load testing is required. Item construction and filtering must be synchronous and bounded by the number of known projects, sessions, models, external targets, and static actions.
 
 Suggested focused tests:
@@ -277,6 +314,7 @@ Suggested focused tests:
 - `CommandPaletteFilteringTests`
 - `CommandPaletteDispatchTests`
 - `CommandPaletteModalTests`
+- Update `DefaultKeymapTests` for `.openCommandPalette`, Command-K, conflict checks, and help visibility.
 
 ## 7. Rationale & Context
 
@@ -348,6 +386,7 @@ After: composerText = "/skill:diagnose "
 - `swift test` passes.
 - `git diff --check` reports no whitespace errors.
 - Command-K appears once in the Default Keymap registry and Keybinding Help.
+- The Pi app menu contains one Command Palette item wired to `.openCommandPalette`.
 - Every Static Palette Item backed by `AppActionID` dispatches through `performAppAction(_:)`.
 - Every Parameterized Palette Item dispatches through the existing shared AppModel method for that behavior.
 - Disabled Palette Items are non-runnable.
@@ -359,3 +398,23 @@ After: composerText = "/skill:diagnose "
 - [Header Control App Action Design](./spec-design-header-actions.md)
 - [Skill Selection Command and Picker Design](./spec-design-skill-selection-picker.md)
 - [File Mention Picker Design](./spec-design-file-mention-picker.md)
+
+## 12. Implementation Handoff
+
+Likely files and modules:
+
+- `Sources/PiAgentNative/DefaultKeymap.swift`: add `.openCommandPalette`, Command-K metadata, display label coverage, and conflict validation.
+- `Sources/PiAgentNative/AppModel.swift`: add palette presentation/query state, item construction, filtered results, dispatch helpers, modal predicates, and the `.openCommandPalette` action case.
+- `Sources/PiAgentNative/AppShellView.swift`: render the native overlay, focus its search field, support Escape/Return/Tab/Up/Down/pointer navigation, and keep existing composer pickers isolated.
+- `Sources/PiAgentNativeExecutable/PiAgentNativeApp.swift`: add the app menu item that uses `DefaultKeymap` and `.openCommandPalette`.
+- `Sources/PiAgentNative/ChatSurfaceView.swift`: reuse existing model, thinking, send/stop, external target, and picker behavior; avoid duplicating dispatch inside palette view code.
+- `Tests/PiAgentNativeTests`: add focused command palette tests and update default keymap expectations.
+
+Planner confidence loop:
+
+1. Initial risk: "command palette" could mean slash commands or shell commands. Fixed by domain language and constraints: native Command Palette only, no arbitrary shell execution, no composer mutation.
+2. Initial risk: static actions and parameterized rows could fork behavior. Fixed by requiring App Actions through `performAppAction(_:)` and parameterized rows through existing `AppModel` methods.
+3. Initial risk: palette modal state could block its own dispatch. Fixed by requiring a palette-specific close-before-dispatch path and an "active modal excluding palette" predicate.
+4. Initial risk: session rows could sort differently from the sidebar. Fixed by requiring `sessionsForProject(selectedProject)` as the source.
+5. Initial risk: Command-K handling could be implemented outside the keymap/menu source of truth. Fixed by requiring Default Keymap plus app `Commands`, not a second broad keyboard dispatcher.
+6. Remaining external limitation: GitHub issue body and project-board mutation were not available from this workspace. The local spec is implementation-ready; the issue tracker still needs the spec link/body update and any status transition performed through the team's GitHub project tooling.

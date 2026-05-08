@@ -28,6 +28,9 @@ public final class AppModel: ObservableObject {
     @Published var isShowingProcessLog = false
     @Published var isShowingSettings = false
     @Published var isShowingKeybindingHelp = false
+    @Published var isShowingCommandPalette = false
+    @Published var commandPaletteQuery = ""
+    @Published var commandPaletteHighlightedItemID: CommandPaletteItem.ID?
     @Published var isSidebarVisible = true
     @Published var isInspectorVisible = true
     @Published var composerFocusRequest = 0
@@ -424,6 +427,8 @@ public final class AppModel: ObservableObject {
             newSession()
         case .openProject:
             openProject()
+        case .openCommandPalette:
+            showCommandPalette()
         case .focusComposer:
             focusComposer()
         case .refreshState:
@@ -456,7 +461,12 @@ public final class AppModel: ObservableObject {
     }
 
     public func canPerformAppAction(_ actionID: AppActionID) -> Bool {
-        if hasActiveModal, actionID != .closeActiveModal {
+        canPerformAppAction(actionID, ignoringCommandPalette: false)
+    }
+
+    private func canPerformAppAction(_ actionID: AppActionID, ignoringCommandPalette: Bool) -> Bool {
+        let activeModalBlocksAction = ignoringCommandPalette ? hasActiveModalExcludingCommandPalette : hasActiveModal
+        if activeModalBlocksAction, actionID != .closeActiveModal {
             return false
         }
 
@@ -465,6 +475,8 @@ public final class AppModel: ObservableObject {
             return selectedProject != nil
         case .openProject, .focusComposer, .openSettings, .openProcessLog, .openKeybindingHelp, .toggleSidebar, .toggleInspector:
             return true
+        case .openCommandPalette:
+            return !hasActiveModalExcludingCommandPalette
         case .refreshState:
             return selectedProject != nil
         case .sendPrompt:
@@ -494,6 +506,11 @@ public final class AppModel: ObservableObject {
     }
 
     public func handleEscapeKey() -> Bool {
+        if isShowingCommandPalette {
+            closeCommandPalette()
+            return true
+        }
+
         if hasActiveModal {
             closeActiveModal()
             return true
@@ -548,6 +565,11 @@ public final class AppModel: ObservableObject {
     }
 
     var hasActiveModal: Bool {
+        isShowingCommandPalette ||
+            hasActiveModalExcludingCommandPalette
+    }
+
+    var hasActiveModalExcludingCommandPalette: Bool {
         isShowingKeybindingHelp ||
             isShowingSettings ||
             isShowingLogin ||
@@ -557,7 +579,9 @@ public final class AppModel: ObservableObject {
     }
 
     func closeActiveModal() {
-        if isShowingKeybindingHelp {
+        if isShowingCommandPalette {
+            closeCommandPalette()
+        } else if isShowingKeybindingHelp {
             isShowingKeybindingHelp = false
         } else if isShowingSettings {
             isShowingSettings = false
@@ -569,6 +593,342 @@ public final class AppModel: ObservableObject {
             isShowingProcessLog = false
         } else if extensionUIRouter.activeRequest != nil {
             cancelExtensionUIRequest()
+        }
+    }
+
+    func showCommandPalette() {
+        guard !hasActiveModalExcludingCommandPalette else {
+            statusText = "Close active modal first"
+            return
+        }
+
+        commandPaletteQuery = ""
+        isShowingCommandPalette = true
+        refreshCommandPaletteHighlight()
+    }
+
+    func closeCommandPalette() {
+        isShowingCommandPalette = false
+        commandPaletteQuery = ""
+        commandPaletteHighlightedItemID = nil
+    }
+
+    func commandPaletteItems() -> [CommandPaletteItem] {
+        var items = staticCommandPaletteItems()
+
+        items.append(contentsOf: projects.map { project in
+            CommandPaletteItem(
+                id: "project:\(project.id)",
+                title: "Switch project: \(project.name)",
+                subtitle: project.path,
+                keywords: ["project", "workspace", "switch", project.name, project.path],
+                iconSystemName: "folder",
+                keybindingLabel: nil,
+                availability: .enabled,
+                invocation: .selectProject(project.id)
+            )
+        })
+
+        if let selectedProject {
+            items.append(contentsOf: sessionsForProject(selectedProject).map { session in
+                CommandPaletteItem(
+                    id: "session:\(session.id)",
+                    title: "Switch session: \(session.title)",
+                    subtitle: session.status,
+                    keywords: ["session", "chat", selectedProject.name, session.title, session.status],
+                    iconSystemName: "bubble.left.and.text.bubble.right",
+                    keybindingLabel: nil,
+                    availability: .enabled,
+                    invocation: .switchSession(session.id)
+                )
+            })
+        }
+
+        items.append(contentsOf: availableModels.map { model in
+            CommandPaletteItem(
+                id: "model:\(model.provider):\(model.modelId)",
+                title: "Select model: \(model.displayName)",
+                subtitle: model.id,
+                keywords: ["model", "provider", model.provider, model.modelId, model.name],
+                iconSystemName: "cpu",
+                keybindingLabel: nil,
+                availability: .enabled,
+                invocation: .selectModel(provider: model.provider, modelID: model.modelId)
+            )
+        })
+
+        items.append(contentsOf: CommandPaletteCatalog.thinkingLevels.map { level in
+            CommandPaletteItem(
+                id: "thinking:\(level)",
+                title: "Set thinking: \(level.capitalized)",
+                subtitle: level == thinkingLevel ? "Current thinking level" : nil,
+                keywords: ["thinking", "reasoning", level],
+                iconSystemName: "brain.head.profile",
+                keybindingLabel: nil,
+                availability: .enabled,
+                invocation: .setThinkingLevel(level)
+            )
+        })
+
+        if selectedProject != nil {
+            items.append(contentsOf: availableExternalTargets.map { target in
+                CommandPaletteItem(
+                    id: "external:\(target.id.rawValue)",
+                    title: "Open externally: \(target.displayName)",
+                    subtitle: selectedProject?.path,
+                    keywords: ["open", "external", "editor", target.displayName, target.id.rawValue],
+                    iconSystemName: target.fallbackSystemImage,
+                    keybindingLabel: nil,
+                    availability: .enabled,
+                    invocation: .openExternalTarget(target.id)
+                )
+            })
+        }
+
+        return items
+    }
+
+    func filteredCommandPaletteItems(query: String) -> [CommandPaletteItem] {
+        CommandPaletteFilter.filteredItems(commandPaletteItems(), query: query)
+    }
+
+    func refreshCommandPaletteHighlight() {
+        let items = filteredCommandPaletteItems(query: commandPaletteQuery)
+        if let highlightedID = commandPaletteHighlightedItemID,
+           items.contains(where: { $0.id == highlightedID }) {
+            return
+        }
+        commandPaletteHighlightedItemID = items.first?.id
+    }
+
+    func moveCommandPaletteHighlight(by delta: Int) {
+        let items = filteredCommandPaletteItems(query: commandPaletteQuery)
+        guard !items.isEmpty else {
+            commandPaletteHighlightedItemID = nil
+            return
+        }
+
+        let currentIndex = commandPaletteHighlightedItemID.flatMap { id in
+            items.firstIndex { $0.id == id }
+        } ?? 0
+        let nextIndex = (currentIndex + delta + items.count) % items.count
+        commandPaletteHighlightedItemID = items[nextIndex].id
+    }
+
+    func runHighlightedCommandPaletteItem() {
+        let items = filteredCommandPaletteItems(query: commandPaletteQuery)
+        guard let item = commandPaletteHighlightedItemID.flatMap({ highlightedID in
+            items.first { $0.id == highlightedID }
+        }) ?? items.first else { return }
+
+        runCommandPaletteItem(item)
+    }
+
+    func runCommandPaletteItem(_ item: CommandPaletteItem) {
+        let availability = commandPaletteAvailability(for: item.invocation)
+        guard availability.isEnabled else {
+            statusText = availability.disabledReason ?? "Command unavailable"
+            return
+        }
+
+        guard let resolvedInvocation = resolveCommandPaletteInvocation(item.invocation) else {
+            statusText = "Command unavailable"
+            return
+        }
+
+        closeCommandPalette()
+        performCommandPaletteInvocation(resolvedInvocation)
+    }
+
+    private func staticCommandPaletteItems() -> [CommandPaletteItem] {
+        let staticActions: [(AppActionID, String, String?, [String], String)] = [
+            (.newChat, "New chat", "Start a new chat in the selected project", ["new", "chat", "session"], "square.and.pencil"),
+            (.openProject, "Open project", "Choose a project folder", ["open", "project", "folder", "workspace"], "folder.badge.plus"),
+            (.focusComposer, "Focus composer", "Move keyboard focus to the prompt composer", ["focus", "composer", "prompt"], "text.cursor"),
+            (.refreshState, "Refresh state", "Refresh Pi state, commands, and project details", ["refresh", "reload", "state"], "arrow.clockwise"),
+            (.openSettings, "Open settings", nil, ["settings", "preferences"], "gearshape"),
+            (.openProcessLog, "Open process log", nil, ["process", "log", "debug"], "list.bullet.rectangle"),
+            (.openKeybindingHelp, "Open Keyboard Shortcuts", nil, ["keyboard", "shortcuts", "help"], "keyboard"),
+            (.toggleSidebar, "Toggle sidebar", nil, ["sidebar", "left", "projects"], "sidebar.left"),
+            (.toggleInspector, "Toggle inspector", nil, ["inspector", "right", "details"], "sidebar.right"),
+            (.sendPrompt, "Send prompt", nil, ["send", "submit", "prompt"], "paperplane"),
+            (.stopGeneration, "Stop generation", nil, ["stop", "abort", "cancel", "generation"], "stop.fill"),
+            (.cycleThinkingLevel, "Cycle thinking level", nil, ["thinking", "reasoning", "cycle"], "brain.head.profile")
+        ]
+
+        var items = staticActions.map { actionID, title, subtitle, keywords, icon in
+            CommandPaletteItem(
+                id: "action:\(actionID.rawValue)",
+                title: title,
+                subtitle: subtitle,
+                keywords: keywords,
+                iconSystemName: icon,
+                keybindingLabel: DefaultKeymap.displayLabel(for: actionID),
+                availability: commandPaletteAvailability(for: .appAction(actionID)),
+                invocation: .appAction(actionID)
+            )
+        }
+
+        items.append(CommandPaletteItem(
+            id: "login",
+            title: "Login",
+            subtitle: "Manage authentication",
+            keywords: ["login", "auth", "authentication", "account"],
+            iconSystemName: "key",
+            keybindingLabel: nil,
+            availability: commandPaletteAvailability(for: .showLogin),
+            invocation: .showLogin
+        ))
+
+        items.append(CommandPaletteItem(
+            id: "model-picker",
+            title: "Select model",
+            subtitle: modelName,
+            keywords: ["select", "model", "provider", modelName],
+            iconSystemName: "cpu",
+            keybindingLabel: nil,
+            availability: commandPaletteAvailability(for: .showModelPicker),
+            invocation: .showModelPicker
+        ))
+
+        return items
+    }
+
+    private func commandPaletteAvailability(for invocation: CommandPaletteInvocation) -> CommandPaletteAvailability {
+        switch invocation {
+        case .appAction(let actionID):
+            guard canPerformAppAction(actionID, ignoringCommandPalette: true) else {
+                return .disabled(reason: unavailableReason(for: actionID))
+            }
+            return .enabled
+
+        case .selectProject(let projectID):
+            return projects.contains(where: { $0.id == projectID })
+                ? .enabled
+                : .disabled(reason: "Project is no longer available")
+
+        case .switchSession(let sessionID):
+            guard let selectedProject else {
+                return .disabled(reason: "Open a project first")
+            }
+            return sessionsForProject(selectedProject).contains(where: { $0.id == sessionID })
+                ? .enabled
+                : .disabled(reason: "Session is no longer available")
+
+        case .selectModel(let provider, let modelID):
+            return availableModels.contains { $0.provider == provider && $0.modelId == modelID }
+                ? .enabled
+                : .disabled(reason: "Model is no longer available")
+
+        case .setThinkingLevel(let level):
+            return CommandPaletteCatalog.thinkingLevels.contains(level)
+                ? .enabled
+                : .disabled(reason: "Thinking level is not supported")
+
+        case .openExternalTarget(let targetID):
+            guard selectedProject != nil else {
+                return .disabled(reason: "Open a project first")
+            }
+            return availableExternalTargets.contains(where: { $0.id == targetID })
+                ? .enabled
+                : .disabled(reason: "External target is no longer available")
+
+        case .showLogin, .showModelPicker:
+            return hasActiveModalExcludingCommandPalette ? .disabled(reason: "Close active modal first") : .enabled
+        }
+    }
+
+    private func unavailableReason(for actionID: AppActionID) -> String {
+        if hasActiveModalExcludingCommandPalette {
+            return "Close active modal first"
+        }
+
+        switch actionID {
+        case .newChat, .refreshState:
+            return "Open a project first"
+        case .sendPrompt:
+            if selectedProject == nil {
+                return "Open a project first"
+            }
+            if isStreaming {
+                return "Generation is already running"
+            }
+            if isCreatingNewSession {
+                return "Wait for the new chat to be created"
+            }
+            if composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return "Enter a prompt first"
+            }
+            if let message = authAccess.sendPromptUnavailableMessage {
+                return message
+            }
+            return "Prompt cannot be sent"
+        case .stopGeneration:
+            return "Nothing is running"
+        case .closeActiveModal:
+            return "No active modal"
+        case .openProject,
+             .openCommandPalette,
+             .focusComposer,
+             .openSettings,
+             .openProcessLog,
+             .openKeybindingHelp,
+             .toggleSidebar,
+             .toggleInspector,
+             .insertComposerNewline,
+             .cycleThinkingLevel:
+            return "Command unavailable"
+        }
+    }
+
+    private func resolveCommandPaletteInvocation(_ invocation: CommandPaletteInvocation) -> ResolvedCommandPaletteInvocation? {
+        switch invocation {
+        case .appAction(let actionID):
+            return .appAction(actionID)
+        case .selectProject(let projectID):
+            guard let project = projects.first(where: { $0.id == projectID }) else { return nil }
+            return .selectProject(project)
+        case .switchSession(let sessionID):
+            guard let selectedProject,
+                  let session = sessionsForProject(selectedProject).first(where: { $0.id == sessionID })
+            else { return nil }
+            return .switchSession(session)
+        case .selectModel(let provider, let modelID):
+            guard let model = availableModels.first(where: { $0.provider == provider && $0.modelId == modelID }) else { return nil }
+            return .selectModel(model)
+        case .setThinkingLevel(let level):
+            guard CommandPaletteCatalog.thinkingLevels.contains(level) else { return nil }
+            return .setThinkingLevel(level)
+        case .openExternalTarget(let targetID):
+            guard selectedProject != nil,
+                  let target = availableExternalTargets.first(where: { $0.id == targetID })
+            else { return nil }
+            return .openExternalTarget(target)
+        case .showLogin:
+            return .showLogin
+        case .showModelPicker:
+            return .showModelPicker
+        }
+    }
+
+    private func performCommandPaletteInvocation(_ invocation: ResolvedCommandPaletteInvocation) {
+        switch invocation {
+        case .appAction(let actionID):
+            performAppAction(actionID)
+        case .selectProject(let project):
+            selectProject(project)
+        case .switchSession(let session):
+            switchSession(session)
+        case .selectModel(let model):
+            selectModel(model)
+        case .setThinkingLevel(let level):
+            setThinkingLevel(level)
+        case .openExternalTarget(let target):
+            openExternally(target)
+        case .showLogin:
+            isShowingLogin = true
+        case .showModelPicker:
+            showModelPicker()
         }
     }
 
@@ -1603,4 +1963,15 @@ public final class AppModel: ObservableObject {
         }
     }
 
+}
+
+private enum ResolvedCommandPaletteInvocation {
+    case appAction(AppActionID)
+    case selectProject(ProjectItem)
+    case switchSession(StoredSession)
+    case selectModel(PiModel)
+    case setThinkingLevel(String)
+    case openExternalTarget(AvailableExternalTarget)
+    case showLogin
+    case showModelPicker
 }

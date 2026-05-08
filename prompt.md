@@ -21,9 +21,9 @@ $build-ios-apps:swiftui-ui-patterns
 
 Stage agent: engineer
 
-You are working on GitHub issue #11: Fix login flow with subscriptions.
+You are working on GitHub issue #23: Add native command palette for App Actions.
 
-Repository issue URL: https://github.com/MatheusBBarni/pi-agent-native/issues/11
+Repository issue URL: https://github.com/MatheusBBarni/pi-agent-native/issues/23
 Current project status: In progress
 Attempt: 
 

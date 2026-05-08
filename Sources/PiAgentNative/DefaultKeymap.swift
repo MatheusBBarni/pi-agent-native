@@ -4,6 +4,7 @@ import SwiftUI
 public enum AppActionID: String, CaseIterable {
     case newChat
     case openProject
+    case openCommandPalette
     case focusComposer
     case refreshState
     case openSettings
@@ -140,13 +141,14 @@ public enum DefaultKeymap {
     public static let definitions: [KeybindingDefinition] = [
         KeybindingDefinition(actionID: .newChat, title: "New chat", key: .character("n"), modifiers: [.command], scope: .appWide, helpGroup: .shell),
         KeybindingDefinition(actionID: .openProject, title: "Open project", key: .character("o"), modifiers: [.command], scope: .appWide, helpGroup: .shell),
+        KeybindingDefinition(actionID: .openCommandPalette, title: "Open Command Palette", key: .character("k"), modifiers: [.command], scope: .appWide, helpGroup: .shell),
         KeybindingDefinition(actionID: .focusComposer, title: "Focus composer", key: .character("l"), modifiers: [.command], scope: .appWide, helpGroup: .shell),
         KeybindingDefinition(actionID: .refreshState, title: "Refresh state", key: .character("r"), modifiers: [.command], scope: .appWide, helpGroup: .shell),
         KeybindingDefinition(actionID: .openSettings, title: "Open settings", key: .character(","), modifiers: [.command], scope: .appWide, helpGroup: .shell),
         KeybindingDefinition(actionID: .openProcessLog, title: "Open process log", key: .character("l"), modifiers: [.command, .shift], scope: .appWide, helpGroup: .shell),
         KeybindingDefinition(actionID: .openKeybindingHelp, title: "Open Keyboard Shortcuts", key: .character("/"), modifiers: [.command], scope: .appWide, helpGroup: .shell),
-        KeybindingDefinition(actionID: .toggleSidebar, title: "Toggle left sidebar", key: .character("b"), modifiers: [.command], scope: .appWide, helpGroup: .shell),
-        KeybindingDefinition(actionID: .toggleInspector, title: "Toggle right sidebar", key: .character("b"), modifiers: [.command, .shift], scope: .appWide, helpGroup: .shell),
+        KeybindingDefinition(actionID: .toggleSidebar, title: "Toggle sidebar", key: .character("s"), modifiers: [.command, .option], scope: .appWide, helpGroup: .shell),
+        KeybindingDefinition(actionID: .toggleInspector, title: "Toggle inspector", key: .character("i"), modifiers: [.command, .option], scope: .appWide, helpGroup: .shell),
         KeybindingDefinition(actionID: .sendPrompt, title: "Send prompt", key: .returnKey, modifiers: [.command], scope: .focused, helpGroup: .chat),
         KeybindingDefinition(actionID: .stopGeneration, title: "Stop generation", key: .escape, modifiers: [], scope: .chat, helpGroup: .chat),
         KeybindingDefinition(actionID: .sendPrompt, title: "Send prompt", key: .returnKey, modifiers: [], scope: .focused, helpGroup: .composer),
