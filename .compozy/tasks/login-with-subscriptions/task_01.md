@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Add runner-owned subscription login state model"
 type: backend
 complexity: medium

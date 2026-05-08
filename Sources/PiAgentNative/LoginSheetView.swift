@@ -43,7 +43,7 @@ struct LoginSheetView: View {
         .padding(22)
         .frame(width: 620)
         .background(Theme.windowBackground)
-        .onChange(of: oauthRunner.lastURL) { _, url in
+        .onChange(of: oauthRunner.attemptState.lastURL) { _, url in
             guard let url, loginURLOpeningTracker.shouldOpen(url) else { return }
             NSWorkspace.shared.open(url)
         }
@@ -105,7 +105,12 @@ struct LoginSheetView: View {
     }
 
     private var subscriptionPane: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let status = SubscriptionLoginStatusSummary.make(
+            selectedProvider: selectedSubscriptionProvider,
+            attemptState: oauthRunner.attemptState
+        )
+
+        return VStack(alignment: .leading, spacing: 12) {
             Text("Provider")
                 .uiFont(size: 13, weight: .medium)
                 .foregroundStyle(Theme.secondaryText)
@@ -116,9 +121,7 @@ struct LoginSheetView: View {
                 }
             }
 
-            Text("Use the terminal command `pi /login` to authenticate your subscription.")
-                .uiFont(size: 12)
-                .foregroundStyle(Theme.secondaryText)
+            SubscriptionLoginStatusView(status: status)
 
             HStack {
                 Button(oauthRunner.isRunning ? "Running..." : "Start Login") {
@@ -127,7 +130,7 @@ struct LoginSheetView: View {
                 }
                 .disabled(oauthRunner.isRunning)
 
-                if let url = oauthRunner.lastURL {
+                if let url = status.providerLoginURL {
                     Button("Open Link") {
                         NSWorkspace.shared.open(url)
                     }
@@ -146,8 +149,12 @@ struct LoginSheetView: View {
                 .disabled(!oauthRunner.isRunning)
             }
 
+            Text("Provider command output")
+                .uiFont(size: 12, weight: .medium)
+                .foregroundStyle(Theme.tertiaryText)
+
             ScrollView {
-                Text(oauthRunner.output.isEmpty ? "Use `pi /login` in terminal to complete subscription authentication." : oauthRunner.output)
+                Text(oauthRunner.output.isEmpty ? "Provider login output will appear here when the command starts." : oauthRunner.output)
                     .uiFont(size: 12, design: .monospaced)
                     .foregroundStyle(Theme.secondaryText)
                     .textSelection(.enabled)
@@ -176,6 +183,69 @@ struct LoginSheetView: View {
                 }
                 .disabled(terminalInput.isEmpty)
             }
+        }
+    }
+}
+
+private struct SubscriptionLoginStatusView: View {
+    let status: SubscriptionLoginStatusSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(status.title)
+                .uiFont(size: 14, weight: .semibold)
+                .foregroundStyle(Theme.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("Selected provider: \(status.providerName)")
+                .uiFont(size: 11, weight: .medium)
+                .foregroundStyle(badgeColor)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Text(status.detail)
+                .uiFont(size: 12)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let url = status.providerLoginURL {
+                Text("Provider Login URL: \(url.absoluteString)")
+                    .uiFont(size: 11, design: .monospaced)
+                    .foregroundStyle(Theme.tertiaryText)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panelBackground)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(borderColor, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var badgeColor: Color {
+        switch status.emphasis {
+        case .neutral:
+            return Theme.tertiaryText
+        case .progress:
+            return Theme.accent
+        case .success:
+            return Theme.green
+        case .failure:
+            return Theme.red
+        }
+    }
+
+    private var borderColor: Color {
+        switch status.emphasis {
+        case .neutral:
+            return Theme.border
+        case .progress, .success, .failure:
+            return badgeColor.opacity(0.65)
         }
     }
 }

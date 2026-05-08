@@ -1,11 +1,11 @@
 ---
-status: pending
+status: completed
 title: "Render structured subscription login state in the Login modal"
 type: frontend
 complexity: medium
 dependencies:
-  - task_02
-  - task_03
+    - task_02
+    - task_03
 ---
 
 # Task 05: Render structured subscription login state in the Login modal

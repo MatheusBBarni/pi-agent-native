@@ -110,25 +110,38 @@ final class OAuthLoginRunner: ObservableObject {
     @Published var lastURL: URL?
     @Published var currentProvider: LoginProvider?
     @Published var currentAttemptID: UUID?
+    @Published var attemptState = SubscriptionLoginAttemptState()
 
     var onCompletion: ((LoginProvider, UUID, Int32) -> Void)?
 
+    private let commandResolver: (LoginProvider) -> OAuthLaunchCommand
+    private let environmentResolver: () -> [String: String]
+    private let authDirectoryURL: () -> URL
     private var process: Process?
     private var stdinPipe: Pipe?
     private var loginURLDetector = ProviderLoginURLDetector()
+
+    init(
+        commandResolver: @escaping (LoginProvider) -> OAuthLaunchCommand = { provider in
+            OAuthLoginService.command(providerID: provider.id)
+        },
+        environmentResolver: @escaping () -> [String: String] = OAuthLoginService.processEnvironment,
+        authDirectoryURL: @escaping () -> URL = { NativeAuthStore.authDirectoryURL }
+    ) {
+        self.commandResolver = commandResolver
+        self.environmentResolver = environmentResolver
+        self.authDirectoryURL = authDirectoryURL
+    }
 
     @discardableResult
     func start(provider: LoginProvider) -> Result<UUID, Error> {
         stop()
         output = ""
-        exitStatus = nil
-        lastURL = nil
         loginURLDetector.reset()
-        currentProvider = provider
         let attemptID = UUID()
-        currentAttemptID = attemptID
+        markStarting(provider: provider, attemptID: attemptID)
 
-        let command = OAuthLoginService.command(providerID: provider.id)
+        let command = commandResolver(provider)
         let process = Process()
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()
@@ -136,11 +149,12 @@ final class OAuthLoginRunner: ObservableObject {
 
         process.executableURL = command.executableURL
         process.arguments = command.arguments
-        process.currentDirectoryURL = NativeAuthStore.authDirectoryURL
+        let authDirectoryURL = authDirectoryURL()
+        process.currentDirectoryURL = authDirectoryURL
         process.standardInput = stdinPipe
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
-        process.environment = OAuthLoginService.processEnvironment()
+        process.environment = environmentResolver()
 
         let consume: (FileHandle) -> Void = { [weak self] handle in
             let data = handle.availableData
@@ -161,18 +175,25 @@ final class OAuthLoginRunner: ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 guard self.currentAttemptID == attemptID else { return }
-                self.append(stdoutRemainder)
-                self.append(stderrRemainder)
-                self.detectFinalLoginURL()
+                let wasStopped = self.attemptState.phase == .stopped
+                self.append(stdoutRemainder, detectProviderLoginURL: !wasStopped)
+                self.append(stderrRemainder, detectProviderLoginURL: !wasStopped)
+                if !wasStopped {
+                    self.detectFinalLoginURL()
+                }
                 self.isRunning = false
                 self.exitStatus = process.terminationStatus
-                self.append("\nLogin process exited with status \(process.terminationStatus).\n")
+                self.attemptState.exitStatus = process.terminationStatus
+                self.append("\nLogin process exited with status \(process.terminationStatus).\n", detectProviderLoginURL: false)
+                if process.terminationStatus != 0, !wasStopped {
+                    self.markFailed("Login exited with status \(process.terminationStatus).", exitStatus: process.terminationStatus)
+                }
                 self.onCompletion?(provider, attemptID, process.terminationStatus)
             }
         }
 
         do {
-            try FileManager.default.createDirectory(at: NativeAuthStore.authDirectoryURL, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: authDirectoryURL, withIntermediateDirectories: true)
             try process.run()
             self.process = process
             self.stdinPipe = stdinPipe
@@ -180,9 +201,8 @@ final class OAuthLoginRunner: ObservableObject {
             append("Running \(command.display)\n\n")
             return .success(attemptID)
         } catch {
-            currentProvider = nil
-            currentAttemptID = nil
-            append("Failed to start login: \(error.localizedDescription)\n")
+            markFailed(error.localizedDescription)
+            append("Failed to start login: \(error.localizedDescription)\n", detectProviderLoginURL: false)
             return .failure(error)
         }
     }
@@ -199,6 +219,9 @@ final class OAuthLoginRunner: ObservableObject {
         process = nil
         stdinPipe = nil
         isRunning = false
+        if shouldMarkStopped {
+            markStopped()
+        }
     }
 
     private func append(_ data: Data) {
@@ -206,20 +229,34 @@ final class OAuthLoginRunner: ObservableObject {
         append(text)
     }
 
-    private func append(_ text: String) {
+    private func append(_ data: Data, detectProviderLoginURL: Bool) {
+        guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+        append(text, detectProviderLoginURL: detectProviderLoginURL)
+    }
+
+    private func append(_ text: String, detectProviderLoginURL: Bool = true) {
         guard !text.isEmpty else { return }
         output += text
+        guard detectProviderLoginURL else { return }
         if let url = loginURLDetector.append(text) {
-            lastURL = url
+            markWaitingForProvider(url: url)
         }
     }
 
     private func detectFinalLoginURL() {
         if let url = loginURLDetector.detectFinalURL() {
-            lastURL = url
+            markWaitingForProvider(url: url)
         }
     }
 
+    private var shouldMarkStopped: Bool {
+        switch attemptState.phase {
+        case .starting, .waitingForProvider, .refreshingAccess:
+            return true
+        case .notStarted, .confirmed, .failed, .stopped:
+            return false
+        }
+    }
 }
 
 struct ProviderLoginURLDetector: Equatable {

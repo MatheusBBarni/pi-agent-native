@@ -60,6 +60,9 @@ public final class AppModel: ObservableObject {
     let oauthLoginRunner = OAuthLoginRunner()
 
     var externalTargetLauncher: ExternalTargetLaunchAction = ExternalTargetLauncher.launch
+    var credentialSnapshotProvider: () -> AuthCredentialSnapshot = NativeAuthStore.credentialSnapshot
+    var rpcCommandSender: ((PiRPCCommand) throws -> Void)?
+    var rpcRestartAction: (() -> Void)?
 
     private let client = PiRPCClient()
     private let reducer = PiRPCEventReducer()
@@ -73,6 +76,32 @@ public final class AppModel: ObservableObject {
     private var mentionIndexTask: Task<Void, Never>?
     private var mentionIndexLoadingProjectPath: String?
     private var handledSubscriptionLoginAttemptIDs: Set<UUID> = []
+    private var selectedModelIdentity: SelectedModelIdentity?
+    private var pendingSubscriptionLoginModelSelection: SelectedModelSelectionSnapshot?
+    private var pendingSubscriptionLoginRefresh: SubscriptionLoginAccessRefreshLink?
+    private var activeSubscriptionLoginRefresh: SubscriptionLoginAccessRefreshLink?
+
+    private struct SelectedModelIdentity: Equatable {
+        var provider: String
+        var modelId: String
+
+        func matches(_ model: PiModel) -> Bool {
+            provider == model.provider && modelId == model.modelId
+        }
+    }
+
+    private struct SelectedModelSelectionSnapshot: Equatable {
+        var identity: SelectedModelIdentity
+        var displayName: String
+        var thinkingLevel: String
+    }
+
+    private struct SubscriptionLoginAccessRefreshLink: Equatable {
+        var provider: LoginProvider
+        var attemptID: UUID
+        var selectedModel: SelectedModelSelectionSnapshot?
+        var refreshEpoch: Int? = nil
+    }
 
     var workspacePath: String {
         get { workspaceStore.workspacePath }
@@ -298,7 +327,8 @@ public final class AppModel: ObservableObject {
             clearAuthDerivedState(
                 authentication: authenticationStateFromCredentialStore(),
                 modelAccess: .refreshing,
-                subscriptionAccess: .refreshing
+                subscriptionAccess: .refreshing,
+                clearModelSelection: !shouldPreserveModelSelectionForPendingSubscriptionRefresh
             )
             let launch = try client.start(workspacePath: selectedProject.path, customExecutable: customExecutablePath)
             isConnected = true
@@ -307,12 +337,7 @@ public final class AppModel: ObservableObject {
             appendLog(title: "started pi rpc", detail: "\(launch.diagnostic) --mode rpc")
             beginAccessRefresh(reason: "pi rpc start")
             sendCommand(.getCommands())
-            if shouldSwitchToStoredSessionAfterStart,
-               let selectedSession,
-               !selectedSession.sessionFile.isEmpty {
-                shouldSwitchToStoredSessionAfterStart = false
-                sendCommand(.switchSession(sessionPath: selectedSession.sessionFile))
-            }
+            switchToSelectedSessionAfterStartIfNeeded()
         } catch {
             isConnected = false
             statusText = "Launch failed"
@@ -332,7 +357,10 @@ public final class AppModel: ObservableObject {
         isStreaming = false
         statusText = "Stopped"
         clearSkillSelectionState(clearAvailableSkills: true)
-        clearAuthDerivedState(authentication: authenticationStateFromCredentialStore())
+        clearAuthDerivedState(
+            authentication: authenticationStateFromCredentialStore(),
+            clearModelSelection: !shouldPreserveModelSelectionForPendingSubscriptionRefresh
+        )
     }
 
     func sendPrompt() {
@@ -769,10 +797,14 @@ public final class AppModel: ObservableObject {
     }
 
     func startSubscriptionLogin(provider: LoginProvider) {
+        pendingSubscriptionLoginRefresh = nil
+        activeSubscriptionLoginRefresh = nil
+        pendingSubscriptionLoginModelSelection = currentSelectedModelSelectionSnapshot()
         clearAuthDerivedState(
             authentication: .authenticating(providerID: provider.id),
             modelAccess: .refreshing,
-            subscriptionAccess: .refreshing
+            subscriptionAccess: .refreshing,
+            clearModelSelection: false
         )
         statusText = "Login in progress"
         appendLog(title: "subscription login", detail: "Starting login for \(provider.name)")
@@ -785,6 +817,9 @@ public final class AppModel: ObservableObject {
     }
 
     func stopSubscriptionLogin() {
+        pendingSubscriptionLoginRefresh = nil
+        activeSubscriptionLoginRefresh = nil
+        pendingSubscriptionLoginModelSelection = nil
         guard let provider = oauthLoginRunner.currentProvider else {
             oauthLoginRunner.stop()
             return
@@ -809,19 +844,37 @@ public final class AppModel: ObservableObject {
         guard oauthLoginRunner.currentAttemptID == attemptID else { return }
         guard handledSubscriptionLoginAttemptIDs.insert(attemptID).inserted else { return }
         if exitStatus == 0 {
+            oauthLoginRunner.exitStatus = exitStatus
+            oauthLoginRunner.markRefreshingAccess()
+            pendingSubscriptionLoginRefresh = SubscriptionLoginAccessRefreshLink(
+                provider: provider,
+                attemptID: attemptID,
+                selectedModel: pendingSubscriptionLoginModelSelection ?? currentSelectedModelSelectionSnapshot()
+            )
+            pendingSubscriptionLoginModelSelection = nil
+            activeSubscriptionLoginRefresh = nil
             clearAuthDerivedState(
                 authentication: .authenticated(providerID: provider.id),
                 modelAccess: .refreshing,
-                subscriptionAccess: .refreshing
+                subscriptionAccess: .refreshing,
+                clearModelSelection: false
             )
             appendLog(title: "subscription login", detail: "Login for \(provider.name) finished; restarting pi RPC")
-            restartRPC()
+            restartRPC(preserveSelectedSession: true)
         } else {
-            completeFailedSubscriptionLogin(provider: provider, message: "Login exited with status \(exitStatus).")
+            completeFailedSubscriptionLogin(
+                provider: provider,
+                message: "Login exited with status \(exitStatus).",
+                exitStatus: exitStatus
+            )
         }
     }
 
-    private func completeFailedSubscriptionLogin(provider: LoginProvider, message: String) {
+    private func completeFailedSubscriptionLogin(provider: LoginProvider, message: String, exitStatus: Int32? = nil) {
+        pendingSubscriptionLoginRefresh = nil
+        activeSubscriptionLoginRefresh = nil
+        pendingSubscriptionLoginModelSelection = nil
+        oauthLoginRunner.markFailed(message, exitStatus: exitStatus)
         accessRefreshTracker.invalidate(
             state: &authAccess,
             authentication: .failed(message: message),
@@ -829,7 +882,7 @@ public final class AppModel: ObservableObject {
             subscriptionAccess: .failed(message: message)
         )
         availableModels.removeAll()
-        modelName = "No model"
+        clearSelectedModelSelection()
         statusText = "Login failed"
         appendLog(title: "subscription login failed", detail: "provider=\(provider.name) \(message)")
     }
@@ -1196,13 +1249,34 @@ public final class AppModel: ObservableObject {
         }
     }
 
-    private func restartRPC() {
+    private func restartRPC(preserveSelectedSession: Bool = false) {
+        if preserveSelectedSession {
+            shouldSwitchToStoredSessionAfterStart = true
+        }
+        if let rpcRestartAction {
+            rpcRestartAction()
+            if preserveSelectedSession {
+                switchToSelectedSessionAfterStartIfNeeded()
+            }
+            return
+        }
         stop()
         start()
     }
 
-    private func beginAccessRefresh(reason: String) {
+    private func switchToSelectedSessionAfterStartIfNeeded() {
+        guard shouldSwitchToStoredSessionAfterStart,
+              let selectedSession,
+              !selectedSession.sessionFile.isEmpty
+        else { return }
+
+        shouldSwitchToStoredSessionAfterStart = false
+        sendCommand(.switchSession(sessionPath: selectedSession.sessionFile))
+    }
+
+    func beginAccessRefresh(reason: String) {
         guard isConnected else {
+            failPendingSubscriptionLoginRefreshIfCurrent(message: "Pi RPC is not connected.")
             clearAuthDerivedState(
                 authentication: authenticationStateFromCredentialStore(),
                 modelAccess: .unknown,
@@ -1212,12 +1286,15 @@ public final class AppModel: ObservableObject {
         }
 
         availableModels.removeAll()
-        modelName = "No model"
+        if !shouldPreserveModelSelectionForPendingSubscriptionRefresh {
+            clearSelectedModelSelection()
+        }
         statusText = "Refreshing access"
         let commandIDs = accessRefreshTracker.begin(
             state: &authAccess,
-            credentialSnapshot: NativeAuthStore.credentialSnapshot()
+            credentialSnapshot: credentialSnapshotProvider()
         )
+        linkPendingSubscriptionLoginRefresh(toRefreshEpoch: commandIDs.epoch)
         appendLog(title: "access refresh", detail: "reason=\(reason) epoch=\(commandIDs.epoch)")
 
         let sentState = sendCommand(.getState(id: commandIDs.stateCommandID))
@@ -1231,6 +1308,7 @@ public final class AppModel: ObservableObject {
                 state: &authAccess,
                 message: "Could not send \(failedCommands)."
             )
+            failActiveSubscriptionLoginRefreshIfCurrent(message: "Could not send \(failedCommands).")
             statusText = "Access refresh failed"
         }
     }
@@ -1238,7 +1316,8 @@ public final class AppModel: ObservableObject {
     private func clearAuthDerivedState(
         authentication: AuthenticationState,
         modelAccess: ModelAccessState = .unknown,
-        subscriptionAccess: SubscriptionAccessState = .unknown
+        subscriptionAccess: SubscriptionAccessState = .unknown,
+        clearModelSelection: Bool = true
     ) {
         accessRefreshTracker.invalidate(
             state: &authAccess,
@@ -1247,18 +1326,24 @@ public final class AppModel: ObservableObject {
             subscriptionAccess: subscriptionAccess
         )
         availableModels.removeAll()
-        modelName = "No model"
+        if clearModelSelection {
+            clearSelectedModelSelection()
+        }
     }
 
     private func authenticationStateFromCredentialStore() -> AuthenticationState {
-        let snapshot = NativeAuthStore.credentialSnapshot()
+        let snapshot = credentialSnapshotProvider()
         return snapshot.isEmpty ? .unknown : .authenticated(providerID: snapshot.singleProviderID)
     }
 
     @discardableResult
     private func sendCommand(_ command: PiRPCCommand) -> Bool {
         do {
-            try client.send(command)
+            if let rpcCommandSender {
+                try rpcCommandSender(command)
+            } else {
+                try client.send(command)
+            }
             return true
         } catch {
             appendLog(title: "send failed", detail: error.localizedDescription)
@@ -1268,6 +1353,42 @@ public final class AppModel: ObservableObject {
 
     private func sendPromptCommand(_ prompt: String) {
         sendCommand(.prompt(prompt))
+    }
+
+    private var shouldPreserveModelSelectionForPendingSubscriptionRefresh: Bool {
+        guard let link = pendingSubscriptionLoginRefresh,
+              link.selectedModel != nil,
+              isCurrentSubscriptionLoginAttempt(link)
+        else { return false }
+        return true
+    }
+
+    private var shouldDeferModelSelectionToActiveSubscriptionRefresh: Bool {
+        guard let link = currentActiveSubscriptionLoginRefreshLink(clearStale: false) else { return false }
+        return link.selectedModel != nil
+    }
+
+    private func currentSelectedModelSelectionSnapshot() -> SelectedModelSelectionSnapshot? {
+        guard let selectedModelIdentity else { return nil }
+        return SelectedModelSelectionSnapshot(
+            identity: selectedModelIdentity,
+            displayName: modelName,
+            thinkingLevel: thinkingLevel
+        )
+    }
+
+    private func setSelectedModel(provider: String, modelId: String, name: String) {
+        selectedModelIdentity = SelectedModelIdentity(provider: provider, modelId: modelId)
+        modelName = displayName(provider: provider, name: name)
+    }
+
+    private func clearSelectedModelSelection() {
+        selectedModelIdentity = nil
+        modelName = "No model"
+    }
+
+    private func displayName(provider: String, name: String) -> String {
+        provider.isEmpty ? name : "\(provider)/\(name)"
     }
 
     private func handleRPCEvent(_ event: PiRPCEvent) {
@@ -1333,7 +1454,7 @@ public final class AppModel: ObservableObject {
         }
     }
 
-    private func handleResponse(_ response: PiRPCResponse) {
+    func handleResponse(_ response: PiRPCResponse) {
         let command = response.command
         let accessEffect = accessRefreshTracker.handle(response: response, state: &authAccess)
 
@@ -1343,8 +1464,9 @@ public final class AppModel: ObservableObject {
             return
         case .failed(let message):
             availableModels.removeAll()
-            modelName = "No model"
+            clearSelectedModelSelection()
             statusText = "Access refresh failed"
+            failActiveSubscriptionLoginRefreshIfCurrent(message: message)
             appendLog(title: "access refresh failed", detail: message)
             return
         case .notAccessRefresh, .waiting, .completed:
@@ -1361,14 +1483,21 @@ public final class AppModel: ObservableObject {
         }
 
         if command == "get_state", let data = response.data {
-            if let model = data["model"] as? [String: Any] {
-                let provider = PiRPCValue.string(model["provider"]) ?? ""
-                let name = PiRPCValue.string(model["name"]) ?? PiRPCValue.string(model["id"]) ?? "Model"
-                modelName = provider.isEmpty ? name : "\(provider)/\(name)"
-            } else {
-                modelName = "No model"
+            if !shouldDeferModelSelectionToActiveSubscriptionRefresh {
+                if let model = data["model"] as? [String: Any] {
+                    let provider = PiRPCValue.string(model["provider"]) ?? ""
+                    let modelId = PiRPCValue.string(model["id"]) ?? ""
+                    let name = PiRPCValue.string(model["name"]) ?? (modelId.isEmpty ? "Model" : modelId)
+                    if modelId.isEmpty {
+                        clearSelectedModelSelection()
+                    } else {
+                        setSelectedModel(provider: provider, modelId: modelId, name: name)
+                    }
+                } else {
+                    clearSelectedModelSelection()
+                }
+                thinkingLevel = PiRPCValue.string(data["thinkingLevel"]) ?? thinkingLevel
             }
-            thinkingLevel = PiRPCValue.string(data["thinkingLevel"]) ?? thinkingLevel
             isStreaming = data["isStreaming"] as? Bool ?? isStreaming
             isCompacting = data["isCompacting"] as? Bool ?? isCompacting
             pendingMessageCount = data["pendingMessageCount"] as? Int ?? pendingMessageCount
@@ -1411,8 +1540,13 @@ public final class AppModel: ObservableObject {
             sendCommand(.getMessages())
         } else if command == "set_model", let data = response.data {
             let provider = PiRPCValue.string(data["provider"]) ?? ""
-            let name = PiRPCValue.string(data["name"]) ?? PiRPCValue.string(data["id"]) ?? "Model"
-            modelName = provider.isEmpty ? name : "\(provider)/\(name)"
+            let modelId = PiRPCValue.string(data["id"]) ?? ""
+            let name = PiRPCValue.string(data["name"]) ?? (modelId.isEmpty ? "Model" : modelId)
+            if modelId.isEmpty {
+                clearSelectedModelSelection()
+            } else {
+                setSelectedModel(provider: provider, modelId: modelId, name: name)
+            }
             appendLog(title: "selected model", detail: modelName)
             refreshState()
         } else if command == "set_thinking_level" {
@@ -1426,8 +1560,7 @@ public final class AppModel: ObservableObject {
             case .waiting:
                 return
             case .completed(let models):
-                availableModels = models
-                updateStatusAfterAccessRefresh()
+                finishCompletedAccessRefresh(models: models)
                 return
             case .notAccessRefresh:
                 availableModels = piModels(from: response.data)
@@ -1458,9 +1591,133 @@ public final class AppModel: ObservableObject {
         }
 
         if case .completed(let models) = accessEffect {
-            availableModels = models
-            updateStatusAfterAccessRefresh()
+            finishCompletedAccessRefresh(models: models)
         }
+    }
+
+    private func finishCompletedAccessRefresh(models: [PiModel]) {
+        availableModels = models
+        applySubscriptionLoginModelContinuityIfNeeded(models: models)
+        updateStatusAfterAccessRefresh()
+        completeActiveSubscriptionLoginRefreshIfCurrent()
+    }
+
+    private func applySubscriptionLoginModelContinuityIfNeeded(models: [PiModel]) {
+        guard let link = currentActiveSubscriptionLoginRefreshLink(clearStale: false),
+              let selectedModel = link.selectedModel
+        else { return }
+
+        if models.contains(where: selectedModel.identity.matches) {
+            selectedModelIdentity = selectedModel.identity
+            modelName = selectedModel.displayName
+            thinkingLevel = selectedModel.thinkingLevel
+            appendLog(
+                title: "selected model preserved",
+                detail: "\(selectedModel.identity.provider)/\(selectedModel.identity.modelId)"
+            )
+        } else {
+            clearSelectedModelSelection()
+            authAccess.modelAccess = .unavailable(
+                reason: "Selected model is no longer available. Choose a model to continue."
+            )
+            appendLog(
+                title: "selected model unavailable",
+                detail: "\(selectedModel.identity.provider)/\(selectedModel.identity.modelId)"
+            )
+        }
+    }
+
+    private func linkPendingSubscriptionLoginRefresh(toRefreshEpoch refreshEpoch: Int) {
+        guard var link = pendingSubscriptionLoginRefresh,
+              isCurrentSubscriptionLoginAttempt(link),
+              oauthLoginRunner.attemptState.phase == .refreshingAccess
+        else {
+            pendingSubscriptionLoginRefresh = nil
+            pendingSubscriptionLoginModelSelection = nil
+            return
+        }
+
+        link.refreshEpoch = refreshEpoch
+        activeSubscriptionLoginRefresh = link
+        pendingSubscriptionLoginRefresh = nil
+        appendLog(
+            title: "access refresh linked to login",
+            detail: "provider=\(link.provider.name) attempt=\(link.attemptID.uuidString) epoch=\(refreshEpoch)"
+        )
+    }
+
+    private func completeActiveSubscriptionLoginRefreshIfCurrent() {
+        guard let link = currentActiveSubscriptionLoginRefreshLink() else { return }
+
+        switch authAccess.subscriptionAccess {
+        case .active(let providerID):
+            oauthLoginRunner.markConfirmed(providerID: providerID ?? link.provider.id)
+            activeSubscriptionLoginRefresh = nil
+            pendingSubscriptionLoginModelSelection = nil
+            appendLog(
+                title: "subscription login confirmed",
+                detail: "provider=\(link.provider.name) attempt=\(link.attemptID.uuidString)"
+            )
+        case .inactive(let reason):
+            failActiveSubscriptionLoginRefreshIfCurrent(
+                message: reason ?? "Refreshed access did not include usable subscription-backed models."
+            )
+        case .failed(let message):
+            failActiveSubscriptionLoginRefreshIfCurrent(message: message)
+        case .unknown, .refreshing:
+            failActiveSubscriptionLoginRefreshIfCurrent(
+                message: "Access refresh finished without subscription confirmation."
+            )
+        }
+    }
+
+    private func failPendingSubscriptionLoginRefreshIfCurrent(message: String) {
+        guard let link = pendingSubscriptionLoginRefresh,
+              isCurrentSubscriptionLoginAttempt(link)
+        else {
+            pendingSubscriptionLoginRefresh = nil
+            return
+        }
+
+        pendingSubscriptionLoginRefresh = nil
+        pendingSubscriptionLoginModelSelection = nil
+        oauthLoginRunner.markFailed(message)
+        appendLog(
+            title: "subscription login failed",
+            detail: "provider=\(link.provider.name) attempt=\(link.attemptID.uuidString) \(message)"
+        )
+    }
+
+    private func failActiveSubscriptionLoginRefreshIfCurrent(message: String) {
+        guard let link = currentActiveSubscriptionLoginRefreshLink() else { return }
+
+        activeSubscriptionLoginRefresh = nil
+        pendingSubscriptionLoginModelSelection = nil
+        oauthLoginRunner.markFailed(message)
+        appendLog(
+            title: "subscription login failed",
+            detail: "provider=\(link.provider.name) attempt=\(link.attemptID.uuidString) \(message)"
+        )
+    }
+
+    private func currentActiveSubscriptionLoginRefreshLink(
+        clearStale: Bool = true
+    ) -> SubscriptionLoginAccessRefreshLink? {
+        guard let link = activeSubscriptionLoginRefresh else { return nil }
+        guard link.refreshEpoch == authAccess.refreshEpoch,
+              isCurrentSubscriptionLoginAttempt(link)
+        else {
+            if clearStale {
+                activeSubscriptionLoginRefresh = nil
+            }
+            return nil
+        }
+        return link
+    }
+
+    private func isCurrentSubscriptionLoginAttempt(_ link: SubscriptionLoginAccessRefreshLink) -> Bool {
+        oauthLoginRunner.currentAttemptID == link.attemptID &&
+            oauthLoginRunner.currentProvider?.id == link.provider.id
     }
 
     private func updateStatusAfterAccessRefresh() {
