@@ -8,14 +8,14 @@ final class InspectorPaneToggleTests: XCTestCase {
         let hidden = InspectorToggleButtonPresentation(isInspectorVisible: false, isEnabled: true, language: .english)
 
         XCTAssertEqual(visible.iconSystemName, "sidebar.right")
-        XCTAssertEqual(visible.helpText, "Toggle inspector - Command-Option-I")
+        XCTAssertEqual(visible.helpText, "Toggle inspector - Command-Shift-B")
         XCTAssertEqual(visible.accessibilityLabel, "Hide inspector")
         XCTAssertEqual(visible.accessibilityValue, "Inspector visible")
         XCTAssertEqual(visible.accessibilityHint, "Toggles the inspector pane")
         XCTAssertFalse(visible.isHighlighted)
 
         XCTAssertEqual(hidden.iconSystemName, "sidebar.right")
-        XCTAssertEqual(hidden.helpText, "Toggle inspector - Command-Option-I")
+        XCTAssertEqual(hidden.helpText, "Toggle inspector - Command-Shift-B")
         XCTAssertEqual(hidden.accessibilityLabel, "Show inspector")
         XCTAssertEqual(hidden.accessibilityValue, "Inspector hidden")
         XCTAssertEqual(hidden.accessibilityHint, "Toggles the inspector pane")
@@ -27,14 +27,14 @@ final class InspectorPaneToggleTests: XCTestCase {
         let hidden = InspectorToggleButtonPresentation(isInspectorVisible: false, isEnabled: true, language: .portugueseBrazil)
 
         XCTAssertEqual(visible.iconSystemName, "sidebar.right")
-        XCTAssertEqual(visible.helpText, "Alternar inspetor - Command-Option-I")
+        XCTAssertEqual(visible.helpText, "Alternar inspetor - Command-Shift-B")
         XCTAssertEqual(visible.accessibilityLabel, "Ocultar inspetor")
         XCTAssertEqual(visible.accessibilityValue, "Inspetor visível")
         XCTAssertEqual(visible.accessibilityHint, "Alterna o painel do inspetor")
         XCTAssertFalse(visible.isHighlighted)
 
         XCTAssertEqual(hidden.iconSystemName, "sidebar.right")
-        XCTAssertEqual(hidden.helpText, "Alternar inspetor - Command-Option-I")
+        XCTAssertEqual(hidden.helpText, "Alternar inspetor - Command-Shift-B")
         XCTAssertEqual(hidden.accessibilityLabel, "Mostrar inspetor")
         XCTAssertEqual(hidden.accessibilityValue, "Inspetor oculto")
         XCTAssertEqual(hidden.accessibilityHint, "Alterna o painel do inspetor")

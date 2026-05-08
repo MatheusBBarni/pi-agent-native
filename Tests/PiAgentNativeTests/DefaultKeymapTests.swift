@@ -15,8 +15,8 @@ final class DefaultKeymapTests: XCTestCase {
         XCTAssertEqual(labelsByAction[.openSettings] ?? [], ["Command-,"])
         XCTAssertEqual(labelsByAction[.openProcessLog] ?? [], ["Command-Shift-L"])
         XCTAssertEqual(labelsByAction[.openKeybindingHelp] ?? [], ["Command-/"])
-        XCTAssertEqual(labelsByAction[.toggleSidebar] ?? [], ["Command-Option-S"])
-        XCTAssertEqual(labelsByAction[.toggleInspector] ?? [], ["Command-Option-I"])
+        XCTAssertEqual(labelsByAction[.toggleSidebar] ?? [], ["Command-B"])
+        XCTAssertEqual(labelsByAction[.toggleInspector] ?? [], ["Command-Shift-B"])
         XCTAssertEqual(labelsByAction[.sendPrompt] ?? [], ["Command-Return", "Return"])
         XCTAssertEqual(labelsByAction[.insertComposerNewline] ?? [], ["Shift-Return"])
         XCTAssertEqual(labelsByAction[.cycleThinkingLevel] ?? [], ["Shift-Tab"])
@@ -71,6 +71,21 @@ final class DefaultKeymapTests: XCTestCase {
         XCTAssertTrue(DefaultKeymap.firstDefinition(for: .cycleThinkingLevel)?.matches(shiftTabEvent) == true)
     }
 
+    @MainActor
+    func testAppWideWindowKeybindingsDispatchSidebarAndInspectorToggles() {
+        let model = AppModel()
+        let commandBEvent = keyEvent(keyCode: 11, charactersIgnoringModifiers: "b", modifiers: .command)
+        let commandShiftBEvent = keyEvent(keyCode: 11, charactersIgnoringModifiers: "b", modifiers: [.command, .shift])
+
+        XCTAssertTrue(model.isSidebarVisible)
+        XCTAssertTrue(model.handleWindowKeyDown(commandBEvent))
+        XCTAssertFalse(model.isSidebarVisible)
+
+        XCTAssertTrue(model.isInspectorVisible)
+        XCTAssertTrue(model.handleWindowKeyDown(commandShiftBEvent))
+        XCTAssertFalse(model.isInspectorVisible)
+    }
+
     func testEveryAppActionAppearsInDefaultKeymap() {
         let mappedActions = Set(DefaultKeymap.definitions.map(\.actionID))
 
@@ -81,6 +96,8 @@ final class DefaultKeymapTests: XCTestCase {
         XCTAssertEqual(DefaultKeymap.helpText(for: .newChat), "New chat - Command-N")
         XCTAssertEqual(DefaultKeymap.helpText(for: .openKeybindingHelp, title: "Help"), "Help - Command-/")
         XCTAssertEqual(DefaultKeymap.title(for: .toggleInspector), "Toggle inspector")
+        XCTAssertEqual(DefaultKeymap.helpText(for: .toggleSidebar), "Toggle sidebar - Command-B")
+        XCTAssertEqual(DefaultKeymap.helpText(for: .toggleInspector), "Toggle inspector - Command-Shift-B")
     }
 
     func testLocalizedActionTitlesUseLookupWithoutChangingShortcutLabels() {

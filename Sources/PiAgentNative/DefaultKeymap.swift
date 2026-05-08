@@ -164,8 +164,8 @@ public enum DefaultKeymap {
         KeybindingDefinition(actionID: .openSettings, title: "Open settings", key: .character(","), modifiers: [.command], scope: .appWide, helpGroup: .shell),
         KeybindingDefinition(actionID: .openProcessLog, title: "Open process log", key: .character("l"), modifiers: [.command, .shift], scope: .appWide, helpGroup: .shell),
         KeybindingDefinition(actionID: .openKeybindingHelp, title: "Open Keyboard Shortcuts", key: .character("/"), modifiers: [.command], scope: .appWide, helpGroup: .shell),
-        KeybindingDefinition(actionID: .toggleSidebar, title: "Toggle sidebar", key: .character("s"), modifiers: [.command, .option], scope: .appWide, helpGroup: .shell),
-        KeybindingDefinition(actionID: .toggleInspector, title: "Toggle inspector", key: .character("i"), modifiers: [.command, .option], scope: .appWide, helpGroup: .shell),
+        KeybindingDefinition(actionID: .toggleSidebar, title: "Toggle sidebar", key: .character("b"), modifiers: [.command], scope: .appWide, helpGroup: .shell),
+        KeybindingDefinition(actionID: .toggleInspector, title: "Toggle inspector", key: .character("b"), modifiers: [.command, .shift], scope: .appWide, helpGroup: .shell),
         KeybindingDefinition(actionID: .sendPrompt, title: "Send prompt", key: .returnKey, modifiers: [.command], scope: .focused, helpGroup: .chat),
         KeybindingDefinition(actionID: .stopGeneration, title: "Stop generation", key: .escape, modifiers: [], scope: .chat, helpGroup: .chat),
         KeybindingDefinition(actionID: .sendPrompt, title: "Send prompt", key: .returnKey, modifiers: [], scope: .focused, helpGroup: .composer),
@@ -188,6 +188,10 @@ public enum DefaultKeymap {
 
     public static func displayLabel(for actionID: AppActionID) -> String? {
         firstDefinition(for: actionID)?.displayLabel
+    }
+
+    public static func appWideDefinition(matching event: NSEvent) -> KeybindingDefinition? {
+        definitions.first { $0.scope == .appWide && $0.matches(event) }
     }
 
     public static func title(for actionID: AppActionID) -> String? {

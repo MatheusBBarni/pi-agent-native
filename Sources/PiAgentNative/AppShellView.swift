@@ -755,12 +755,8 @@ struct WindowKeyboardHandler: NSViewRepresentable {
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self else { return event }
                 guard event.window === window else { return event }
-                guard let escapeDefinition = DefaultKeymap.firstDefinition(for: .closeActiveModal),
-                      escapeDefinition.matches(event) else {
-                    return event
-                }
                 let handled = MainActor.assumeIsolated {
-                    self.model.handleEscapeKey()
+                    self.model.handleWindowKeyDown(event)
                 }
                 return handled ? nil : event
             }

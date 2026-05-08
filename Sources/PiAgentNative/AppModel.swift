@@ -600,6 +600,22 @@ public final class AppModel: ObservableObject {
         return false
     }
 
+    public func handleWindowKeyDown(_ event: NSEvent) -> Bool {
+        if let escapeDefinition = DefaultKeymap.firstDefinition(for: .closeActiveModal),
+           escapeDefinition.matches(event) {
+            return handleEscapeKey()
+        }
+
+        guard let definition = DefaultKeymap.appWideDefinition(matching: event),
+              canPerformAppAction(definition.actionID)
+        else {
+            return false
+        }
+
+        performAppAction(definition.actionID)
+        return true
+    }
+
     public func openProject() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
