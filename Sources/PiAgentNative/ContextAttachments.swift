@@ -41,6 +41,15 @@ enum ContextAttachmentKind: Equatable {
         }
     }
 
+    func localizedLabel(l10n: L10n) -> String {
+        switch self {
+        case .file:
+            return l10n.string("chat.context_attachment.kind.file")
+        case .folder:
+            return l10n.string("chat.context_attachment.kind.folder")
+        }
+    }
+
     var systemImage: String {
         switch self {
         case .file: return "doc.text"
@@ -90,6 +99,26 @@ enum ContextAttachmentStatus: Equatable {
             return "Project changed"
         case .resolutionFailed:
             return "Unavailable"
+        }
+    }
+
+    func displayText(l10n: L10n) -> String {
+        switch self {
+        case .valid:
+            return l10n.string("chat.context_attachment.status.ready")
+        case .missing:
+            return l10n.string("chat.context_attachment.status.missing")
+        case .wrongKind(let actualKind):
+            guard let actualKind else {
+                return l10n.string("chat.context_attachment.status.wrong_kind")
+            }
+            return l10n.string("chat.context_attachment.status.now_a_kind", actualKind.localizedLabel(l10n: l10n))
+        case .outOfProject:
+            return l10n.string("chat.context_attachment.status.outside_project")
+        case .projectChanged:
+            return l10n.string("chat.context_attachment.status.project_changed")
+        case .resolutionFailed:
+            return l10n.string("chat.context_attachment.status.unavailable")
         }
     }
 }

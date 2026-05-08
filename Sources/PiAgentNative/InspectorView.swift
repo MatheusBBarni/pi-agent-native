@@ -12,22 +12,28 @@ struct InspectorView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    InspectorCard(title: "Branch details") {
+                    InspectorCard(title: model.l10n.string("inspector.branch_details.title")) {
                         InspectorMetric(icon: "point.3.connected.trianglepath.dotted", title: model.gitDetails.branch)
                         InspectorMetric(
                             icon: model.gitDetails.hasChanges ? "circle.fill" : "checkmark.circle",
                             title: model.gitDetails.changeSummary
                         )
-                        InspectorMetric(icon: "checkmark.circle", title: model.isConnected ? "Pi RPC connected" : "No process")
+                        InspectorMetric(
+                            icon: "checkmark.circle",
+                            title: InspectorPresentation.processStatus(isConnected: model.isConnected, l10n: model.l10n)
+                        )
                         InspectorMetric(icon: "sparkles", title: model.modelName)
-                        InspectorMetric(icon: "brain.head.profile", title: "\(model.thinkingLevel.capitalized) thinking")
+                        InspectorMetric(
+                            icon: "brain.head.profile",
+                            title: InspectorPresentation.thinkingLevel(model.thinkingLevel, l10n: model.l10n)
+                        )
                     }
 
-                    InspectorCard(title: "Queued work") {
-                        QueuedWorkSurface(state: model.queuedWorkDisplayState)
+                    InspectorCard(title: model.l10n.string("inspector.queued_work.title")) {
+                        QueuedWorkSurface(state: model.queuedWorkDisplayState, l10n: model.l10n)
                     }
 
-                    InspectorCard(title: "Changes") {
+                    InspectorCard(title: model.l10n.string("inspector.changes.title")) {
                         InspectorMetric(
                             icon: changesIcon,
                             title: changesSummary
@@ -35,19 +41,21 @@ struct InspectorView: View {
                         Button {
                             model.openChangeReview()
                         } label: {
-                            Label("Review", systemImage: "doc.text.magnifyingglass")
+                            Label(model.l10n.string("inspector.changes.review"), systemImage: "doc.text.magnifyingglass")
                                 .uiFont(size: 13, weight: .medium)
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(model.selectedProject == nil)
-                        .help(model.selectedProject == nil ? "Open a project first" : "Review repository changes")
+                        .help(model.selectedProject == nil
+                              ? model.l10n.string("inspector.changes.review_help.open_project_first")
+                              : model.l10n.string("inspector.changes.review_help.available"))
                     }
 
                     if !model.tools.isEmpty {
-                        InspectorCard(title: "Tool activity") {
+                        InspectorCard(title: model.l10n.string("inspector.tool_activity.title")) {
                             ForEach(model.tools) { tool in
-                                ToolActivityRow(tool: tool)
+                                ToolActivityRow(tool: tool, l10n: model.l10n)
                                 if tool.id != model.tools.last?.id {
                                     Divider()
                                         .overlay(Theme.border)
@@ -84,43 +92,30 @@ struct InspectorView: View {
     }
 
     private var changesSummary: String {
-        switch model.repositoryChangeSnapshot.status {
-        case .loading:
-            return "Refreshing changes"
-        case .dirty:
-            let count = model.repositoryChangeSnapshot.files.count
-            return "\(count) changed file\(count == 1 ? "" : "s")"
-        case .clean:
-            return "No changes"
-        case .notRepository:
-            return "Not a Git repository"
-        case .unavailable(let reason):
-            return reason
-        case .failed(let message):
-            return message
-        }
+        InspectorPresentation.changesSummary(for: model.repositoryChangeSnapshot, l10n: model.l10n)
     }
 }
 
 struct QueuedWorkSurface: View {
     let state: QueuedWorkDisplayState
+    let l10n: L10n
 
     var body: some View {
         switch state {
         case .empty:
-            InspectorMetric(icon: "tray", title: "No queued work")
+            InspectorMetric(icon: "tray", title: l10n.string("inspector.queued_work.empty"))
         case .countOnly(let count):
             VStack(alignment: .leading, spacing: 6) {
-                InspectorMetric(icon: "tray", title: "\(count) \(count == 1 ? "item" : "items") queued")
-                Text("Waiting for queue details")
+                InspectorMetric(icon: "tray", title: l10n.plural("inspector.queued_work.count", count: count))
+                Text(l10n.string("inspector.queued_work.waiting_details"))
                     .uiFont(size: 11)
                     .foregroundStyle(Theme.tertiaryText)
             }
         case .entries(let entries):
             VStack(alignment: .leading, spacing: 10) {
-                InspectorMetric(icon: "tray", title: "\(entries.count) \(entries.count == 1 ? "item" : "items") queued")
+                InspectorMetric(icon: "tray", title: l10n.plural("inspector.queued_work.count", count: entries.count))
                 ForEach(entries) { entry in
-                    QueuedWorkEntryRow(entry: entry)
+                    QueuedWorkEntryRow(entry: entry, l10n: l10n)
                     if entry.id != entries.last?.id {
                         Divider()
                             .overlay(Theme.border)
@@ -131,8 +126,55 @@ struct QueuedWorkSurface: View {
     }
 }
 
+enum InspectorPresentation {
+    static func processStatus(isConnected: Bool, l10n: L10n) -> String {
+        l10n.string(isConnected ? "inspector.process.connected" : "inspector.process.no_process")
+    }
+
+    static func changesSummary(for snapshot: RepositoryChangeSnapshot, l10n: L10n) -> String {
+        switch snapshot.status {
+        case .loading:
+            return l10n.string("inspector.changes.refreshing")
+        case .dirty:
+            return l10n.plural("app_model.git.changed_files_count", count: snapshot.files.count)
+        case .clean:
+            return l10n.string("app_model.git.no_changes")
+        case .notRepository:
+            return l10n.string("inspector.changes.not_repository")
+        case .unavailable(let reason):
+            return reason
+        case .failed(let message):
+            return message
+        }
+    }
+
+    static func thinkingLevel(_ level: String, l10n: L10n) -> String {
+        l10n.string("inspector.thinking_level", localizedThinkingLevel(level, l10n: l10n))
+    }
+
+    private static func localizedThinkingLevel(_ level: String, l10n: L10n) -> String {
+        switch level {
+        case "off":
+            return l10n.string("command_palette.thinking.level.off")
+        case "minimal":
+            return l10n.string("command_palette.thinking.level.minimal")
+        case "low":
+            return l10n.string("command_palette.thinking.level.low")
+        case "medium":
+            return l10n.string("command_palette.thinking.level.medium")
+        case "high":
+            return l10n.string("command_palette.thinking.level.high")
+        case "xhigh":
+            return l10n.string("command_palette.thinking.level.xhigh")
+        default:
+            return level
+        }
+    }
+}
+
 struct QueuedWorkEntryRow: View {
     let entry: QueuedWorkEntry
+    let l10n: L10n
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -141,13 +183,13 @@ struct QueuedWorkEntryRow: View {
                     .uiFont(size: 12)
                     .frame(width: 16)
                     .foregroundStyle(entry.kind == .steering ? Theme.accent : Theme.green)
-                Text(entry.title)
+                Text(entry.title(l10n: l10n))
                     .uiFont(size: 12, weight: .semibold)
                     .foregroundStyle(Theme.secondaryText)
                 Spacer()
             }
 
-            Text(entry.summary(maxLength: 180))
+            Text(entry.summary(maxLength: 180, l10n: l10n))
                 .uiFont(size: 11)
                 .foregroundStyle(Theme.tertiaryText)
                 .lineLimit(3)
@@ -155,7 +197,7 @@ struct QueuedWorkEntryRow: View {
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(entry.title): \(entry.summary)")
+        .accessibilityLabel("\(entry.title(l10n: l10n)): \(entry.summary(l10n: l10n))")
     }
 
     private var icon: String {
@@ -211,6 +253,7 @@ struct InspectorMetric: View {
 
 struct ToolActivityRow: View {
     let tool: ToolActivity
+    let l10n: L10n
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -237,7 +280,7 @@ struct ToolActivityRow: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, 4)
                 } label: {
-                    Text("Output")
+                    Text(l10n.string("inspector.tool_activity.output"))
                         .uiFont(size: 11, weight: .medium)
                         .foregroundStyle(Theme.tertiaryText)
                 }

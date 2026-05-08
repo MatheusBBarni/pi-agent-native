@@ -6,10 +6,10 @@ struct ProcessLogSheetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Process Log")
+                Text(model.l10n.string("process_log.title"))
                     .uiFont(size: 20, weight: .semibold)
                 Spacer()
-                Button("Close") {
+                Button(model.l10n.string("process_log.close")) {
                     model.isShowingProcessLog = false
                 }
             }
@@ -17,7 +17,7 @@ struct ProcessLogSheetView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     if model.eventLog.isEmpty {
-                        Text("No events yet")
+                        Text(model.l10n.string("process_log.empty"))
                             .foregroundStyle(Theme.tertiaryText)
                             .frame(maxWidth: .infinity, minHeight: 240, alignment: .center)
                     } else {

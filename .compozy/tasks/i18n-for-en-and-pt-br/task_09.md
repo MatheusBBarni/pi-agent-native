@@ -1,10 +1,10 @@
 ---
-status: pending
+status: completed
 title: "Localize Extension Dialog Controls"
 type: frontend
 complexity: low
 dependencies:
-  - task_02
+    - task_02
 ---
 
 # Task 09: Localize Extension Dialog Controls

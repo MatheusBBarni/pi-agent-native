@@ -40,6 +40,7 @@ final class HeaderActionTests: XCTestCase {
     func testPreviousAndNextSessionUseRenderedProjectSessionOrder() {
         let fixture = makeSessionNavigationFixture(selectedSessionID: "middle")
         let model = fixture.model
+        model.appLanguage = .english
 
         XCTAssertEqual(model.sessionsForProject(fixture.project).map(\.id), ["newest", "middle", "oldest"])
         XCTAssertTrue(model.canNavigateToPreviousSession())
@@ -65,6 +66,7 @@ final class HeaderActionTests: XCTestCase {
     func testPreviousAndNextSessionDisableAtBoundariesAndUnavailableStates() {
         let fixture = makeSessionNavigationFixture(selectedSessionID: "newest")
         let model = fixture.model
+        model.appLanguage = .english
 
         XCTAssertFalse(model.canNavigateToPreviousSession())
         XCTAssertTrue(model.canNavigateToNextSession())
@@ -101,6 +103,30 @@ final class HeaderActionTests: XCTestCase {
 
         model.navigateToPreviousSession()
         XCTAssertEqual(model.selectedSessionID, "middle")
+    }
+
+    func testPreviousAndNextSessionHelpTextLocalizesWithoutChangingNavigationBehavior() {
+        let fixture = makeSessionNavigationFixture(selectedSessionID: "middle")
+        let model = fixture.model
+        model.appLanguage = .portugueseBrazil
+
+        XCTAssertTrue(model.canNavigateToPreviousSession())
+        XCTAssertTrue(model.canNavigateToNextSession())
+        XCTAssertEqual(model.previousSessionHelpText(), "Sessão anterior")
+        XCTAssertEqual(model.nextSessionHelpText(), "Próxima sessão")
+
+        model.selectedSessionID = "newest"
+        XCTAssertFalse(model.canNavigateToPreviousSession())
+        XCTAssertEqual(model.previousSessionHelpText(), "Não há sessão anterior")
+
+        model.selectedSessionID = nil
+        XCTAssertFalse(model.canNavigateToNextSession())
+        XCTAssertEqual(model.nextSessionHelpText(), "Selecione uma sessão primeiro")
+
+        model.selectedSessionID = "middle"
+        model.isShowingSettings = true
+        XCTAssertFalse(model.canNavigateToPreviousSession())
+        XCTAssertEqual(model.previousSessionHelpText(), "Feche o modal ativo primeiro")
     }
 
     func testPreviousAndNextSessionDoNotIntroduceDefaultKeymapActions() {

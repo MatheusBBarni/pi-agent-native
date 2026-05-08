@@ -23,6 +23,7 @@ final class CommandPaletteTests: XCTestCase {
     @MainActor
     func testOpenCommandPaletteUsesModalRulesAndPreservesComposerText() {
         let model = AppModel()
+        model.appLanguage = .english
         model.composerText = "/skill:diagnose "
 
         model.performAppAction(.openCommandPalette)
@@ -42,6 +43,7 @@ final class CommandPaletteTests: XCTestCase {
     @MainActor
     func testStaticItemsExposeKeybindingsAndFilterDeterministically() {
         let model = AppModel()
+        model.appLanguage = .english
 
         let emptyQueryItems = model.filteredCommandPaletteItems(query: "")
         XCTAssertFalse(emptyQueryItems.contains { $0.invocation == .appAction(.openCommandPalette) })
@@ -57,6 +59,7 @@ final class CommandPaletteTests: XCTestCase {
     @MainActor
     func testDisabledStaticItemDoesNotRunOrClosePalette() {
         let model = AppModel()
+        model.appLanguage = .english
         model.showCommandPalette()
         let sendItem = model.commandPaletteItems().first { $0.invocation == .appAction(.sendPrompt) }!
 
@@ -70,6 +73,7 @@ final class CommandPaletteTests: XCTestCase {
     @MainActor
     func testStaticAppActionClosesPaletteBeforeDispatch() {
         let model = AppModel()
+        model.appLanguage = .english
         model.showCommandPalette()
         let settingsItem = model.commandPaletteItems().first { $0.invocation == .appAction(.openSettings) }!
 
@@ -82,6 +86,7 @@ final class CommandPaletteTests: XCTestCase {
     @MainActor
     func testProjectAndSessionItemsDispatchThroughAppModelStatePaths() {
         let model = AppModel()
+        model.appLanguage = .english
         let project = ProjectItem(id: "project-a", name: "Repo", path: "/tmp/repo")
         let session = StoredSession(
             id: "session-a",
@@ -112,6 +117,7 @@ final class CommandPaletteTests: XCTestCase {
     @MainActor
     func testSessionItemsUseSidebarOrdering() {
         let model = AppModel()
+        model.appLanguage = .english
         let project = ProjectItem(id: "project-a", name: "Repo", path: "/tmp/repo")
         let older = StoredSession(
             id: "older",
@@ -151,6 +157,7 @@ final class CommandPaletteTests: XCTestCase {
     @MainActor
     func testParameterizedItemsResolveCurrentStateAtDispatchTime() {
         let model = AppModel()
+        model.appLanguage = .english
         let project = ProjectItem(id: "project-a", name: "Repo", path: "/tmp/repo")
         model.projects = [project]
         let projectItem = model.commandPaletteItems().first { $0.invocation == .selectProject(project.id) }!
@@ -167,6 +174,7 @@ final class CommandPaletteTests: XCTestCase {
     @MainActor
     func testModelThinkingAndExternalItemsUseSharedDispatchPaths() {
         let model = AppModel()
+        model.appLanguage = .english
         let project = ProjectItem(id: "project-a", name: "Repo", path: "/tmp/repo")
         let target = AvailableExternalTarget(
             definition: ExternalTargetCatalog.definitions.first { $0.id == .finder }!,
@@ -203,6 +211,89 @@ final class CommandPaletteTests: XCTestCase {
 
         XCTAssertEqual(openedTargetID, .finder)
         XCTAssertEqual(openedProjectPath, project.path)
+    }
+
+    @MainActor
+    func testLocalizedCommandPaletteFindsAppOwnedRowsAndPreservesVerbatimValues() {
+        resetLanguagePreference()
+        defer { resetLanguagePreference() }
+
+        let model = AppModel()
+        model.appLanguage = .portugueseBrazil
+        let project = ProjectItem(id: "project-a", name: "Raw Repo", path: "/tmp/Raw Repo")
+        let session = StoredSession(
+            id: "session-a",
+            piSessionID: "pi-session-a",
+            projectID: project.id,
+            projectPath: project.path,
+            projectName: project.name,
+            title: "Fix Auth Flow",
+            status: "Ready",
+            sessionFile: "/tmp/session-a.json",
+            updatedAt: Date(timeIntervalSince1970: 100)
+        )
+        model.projects = [project]
+        model.selectedProjectID = project.id
+        model.workspacePath = project.path
+        model.sessions = [session]
+        model.availableModels = [
+            PiModel(provider: "openai-codex", modelId: "gpt-5.4-mini/pi", name: "GPT Raw")
+        ]
+
+        let processLogItem = model.filteredCommandPaletteItems(query: "registro").first
+        XCTAssertEqual(processLogItem?.invocation, .appAction(.openProcessLog))
+        XCTAssertEqual(processLogItem?.title, "Abrir registro de processo")
+
+        let projectItem = model.commandPaletteItems().first { $0.invocation == .selectProject(project.id) }
+        XCTAssertEqual(projectItem?.title, "Trocar projeto: Raw Repo")
+        XCTAssertEqual(projectItem?.subtitle, "/tmp/Raw Repo")
+
+        let sessionItem = model.commandPaletteItems().first { $0.invocation == .switchSession(session.id) }
+        XCTAssertEqual(sessionItem?.title, "Trocar sessão: Fix Auth Flow")
+        XCTAssertEqual(sessionItem?.subtitle, "Ready")
+
+        let modelItem = model.commandPaletteItems().first {
+            $0.invocation == .selectModel(provider: "openai-codex", modelID: "gpt-5.4-mini/pi")
+        }
+        XCTAssertEqual(modelItem?.title, "Selecionar modelo: GPT Raw")
+        XCTAssertEqual(modelItem?.subtitle, "openai-codex/gpt-5.4-mini/pi")
+    }
+
+    @MainActor
+    func testLocalizedCommandPaletteDisabledReasonDoesNotMutateInvocation() {
+        resetLanguagePreference()
+        defer { resetLanguagePreference() }
+
+        let model = AppModel()
+        model.appLanguage = .portugueseBrazil
+        model.showCommandPalette()
+        let sendItem = model.commandPaletteItems().first { $0.invocation == .appAction(.sendPrompt) }!
+
+        model.runCommandPaletteItem(sendItem)
+
+        XCTAssertTrue(model.isShowingCommandPalette)
+        XCTAssertEqual(model.statusText, "Abra um projeto primeiro")
+        XCTAssertEqual(sendItem.invocation, .appAction(.sendPrompt))
+        XCTAssertNil(model.selectedSessionID)
+    }
+
+    @MainActor
+    func testMenuFacingLabelsLocalizeThroughAppModelWithoutChangingShortcutLabels() {
+        resetLanguagePreference()
+        defer { resetLanguagePreference() }
+
+        let model = AppModel()
+        model.appLanguage = .portugueseBrazil
+
+        XCTAssertEqual(model.localizedTitle(for: .newChat), "Novo chat")
+        XCTAssertEqual(model.localizedTitle(for: .openCommandPalette), "Abrir Paleta de Comandos")
+        XCTAssertEqual(model.startPiRPCMenuTitle, "Iniciar Pi RPC")
+        XCTAssertEqual(model.stopPiRPCMenuTitle, "Parar Pi RPC")
+        XCTAssertEqual(DefaultKeymap.displayLabel(for: .openCommandPalette), "Command-K")
+    }
+
+    private func resetLanguagePreference() {
+        UserDefaults.standard.removeObject(forKey: "appLanguage")
     }
 
     private func temporaryDirectoryURL() -> URL {

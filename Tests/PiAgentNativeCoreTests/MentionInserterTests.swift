@@ -14,6 +14,17 @@ final class MentionInserterTests: XCTestCase {
         )
     }
 
+    func testLocalizedMentionPickerCopyDoesNotChangeInsertedMentionPath() {
+        XCTAssertEqual(
+            L10n(language: .portugueseBrazil).string("chat.mention_picker.no_matching_files"),
+            "Nenhum arquivo correspondente"
+        )
+        XCTAssertEqual(
+            MentionInserter.replacementText(for: entry("Sources/Raw Path/File.swift", isDirectory: false)),
+            "@Sources/Raw Path/File.swift "
+        )
+    }
+
     func testReplacesOnlyActiveQuery() throws {
         let root = temporaryDirectory()
         let file = root.appendingPathComponent("Sources/App.swift")

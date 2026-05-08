@@ -11,6 +11,7 @@ final class ContextAttachmentSubmissionTests: XCTestCase {
         let project = ProjectItem(id: "project-a", name: "Project", path: root.path)
         let skill = AvailableSkill(id: "diagnose", displayName: nil, description: nil, skillFilePath: nil, skillBaseDir: nil)
         let model = AppModel()
+        model.appLanguage = .english
         model.projects = [project]
         model.selectedProjectID = project.id
         model.workspacePath = project.path

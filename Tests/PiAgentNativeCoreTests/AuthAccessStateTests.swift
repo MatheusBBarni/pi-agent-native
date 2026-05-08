@@ -2,6 +2,81 @@ import XCTest
 @testable import PiAgentNativeCore
 
 final class AuthAccessStateTests: XCTestCase {
+    func testModelAndSubscriptionAccessMessagesLocalizeFailurePayloadVerbatim() {
+        let payload = #"RPC error {"provider":"anthropic","code":"raw/42"}"#
+
+        XCTAssertEqual(
+            ModelAccessState.failed(message: payload).unavailableMessage(l10n: L10n(language: .english)),
+            #"Could not refresh model access: RPC error {"provider":"anthropic","code":"raw/42"}"#
+        )
+        XCTAssertEqual(
+            ModelAccessState.failed(message: payload).unavailableMessage(l10n: L10n(language: .portugueseBrazil)),
+            #"Não foi possível atualizar o acesso ao modelo: RPC error {"provider":"anthropic","code":"raw/42"}"#
+        )
+        XCTAssertEqual(
+            SubscriptionAccessState.failed(message: payload).unavailableMessage(l10n: L10n(language: .portugueseBrazil)),
+            #"Não foi possível atualizar o acesso por assinatura: RPC error {"provider":"anthropic","code":"raw/42"}"#
+        )
+    }
+
+    func testModelPickerEmptyStatesLocalizeAppOwnedCopy() {
+        var state = AuthAccessState(authentication: .unauthenticated)
+
+        XCTAssertEqual(state.modelPickerEmptyTitle(l10n: L10n(language: .english)), "Not logged in")
+        XCTAssertEqual(state.modelPickerEmptyTitle(l10n: L10n(language: .portugueseBrazil)), "Não conectado")
+        XCTAssertEqual(
+            state.modelPickerEmptyDetail(l10n: L10n(language: .portugueseBrazil)),
+            "Use Login para adicionar uma chave de API ou assinatura e depois atualize."
+        )
+
+        state.modelAccess = .failed(message: "raw failure /tmp/auth.json")
+
+        XCTAssertEqual(
+            state.modelPickerEmptyDetail(l10n: L10n(language: .portugueseBrazil)),
+            "raw failure /tmp/auth.json"
+        )
+    }
+
+    func testModelPickerAvailableBranchDetailsLocalizeAppOwnedCopy() {
+        let l10n = L10n(language: .portugueseBrazil)
+        var state = AuthAccessState(modelAccess: .refreshing)
+
+        XCTAssertEqual(state.modelPickerEmptyTitle(l10n: l10n), "Atualizando acesso ao modelo")
+
+        state.modelAccess = .unavailable(reason: nil)
+        XCTAssertEqual(state.modelPickerEmptyTitle(l10n: l10n), "Sem acesso ao modelo")
+        XCTAssertEqual(
+            state.modelPickerEmptyDetail(l10n: l10n),
+            "Nenhum modelo autenticado foi retornado para as credenciais atuais."
+        )
+
+        state.modelAccess = .available(providerID: "openai")
+        state.subscriptionAccess = .active(providerID: "openai")
+        XCTAssertEqual(state.modelPickerEmptyTitle(l10n: l10n), "Nenhum modelo carregado")
+        XCTAssertEqual(
+            state.modelPickerEmptyDetail(l10n: l10n),
+            "O acesso ao modelo e o acesso por assinatura estão ativos, mas nenhum modelo foi retornado para exibição."
+        )
+
+        state.subscriptionAccess = .inactive(reason: nil)
+        XCTAssertEqual(
+            state.modelPickerEmptyDetail(l10n: l10n),
+            "O acesso ao modelo está disponível sem uma assinatura ativa."
+        )
+
+        state.subscriptionAccess = .refreshing
+        XCTAssertEqual(
+            state.modelPickerEmptyDetail(l10n: l10n),
+            "O acesso ao modelo está disponível enquanto o acesso por assinatura ainda está sendo verificado."
+        )
+
+        state.subscriptionAccess = .failed(message: "raw subscription payload")
+        XCTAssertEqual(
+            state.modelPickerEmptyDetail(l10n: l10n),
+            "O acesso ao modelo está disponível, mas a atualização da assinatura falhou: raw subscription payload"
+        )
+    }
+
     func testAPIKeyModelsEnableModelAccessWithoutSubscriptionAccess() {
         var state = AuthAccessState(
             authentication: .authenticated(providerID: "anthropic"),
@@ -64,6 +139,33 @@ final class AuthAccessStateTests: XCTestCase {
         XCTAssertEqual(effect, .completed(models: [PiModel(provider: "openai-codex", modelId: "gpt-5", name: "GPT-5")]))
         XCTAssertEqual(state.modelAccess, .available(providerID: "openai-codex"))
         XCTAssertEqual(state.subscriptionAccess, .active(providerID: "openai-codex"))
+    }
+
+    func testSuccessfulRefreshReasonsLocalizeWithSelectedLanguage() {
+        var state = AuthAccessState()
+        var tracker = AuthAccessRefreshTracker()
+        _ = tracker.begin(
+            state: &state,
+            credentialSnapshot: AuthCredentialSnapshot(credentialsByProvider: ["openai": .apiKey]),
+            stateCommandID: "state-localized",
+            modelsCommandID: "models-localized"
+        )
+
+        _ = tracker.handle(
+            response: response(id: "state-localized", command: "get_state"),
+            state: &state,
+            l10n: L10n(language: .portugueseBrazil)
+        )
+        _ = tracker.handle(
+            response: response(id: "models-localized", command: "get_available_models", data: modelsData(provider: "openai")),
+            state: &state,
+            l10n: L10n(language: .portugueseBrazil)
+        )
+
+        XCTAssertEqual(
+            state.subscriptionAccess,
+            .inactive(reason: "O acesso ao modelo está disponível, mas nenhuma credencial baseada em assinatura foi encontrada.")
+        )
     }
 
     func testEnvironmentBackedModelsDoNotBecomeSubscriptionAccessWhenCredentialSourceIsUnknown() {

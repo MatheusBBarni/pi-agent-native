@@ -15,19 +15,19 @@ struct PiAgentNativeApp: App {
         .windowStyle(.hiddenTitleBar)
         .commands {
             CommandMenu("Pi") {
-                Button(DefaultKeymap.title(for: .newChat) ?? "New chat") {
+                Button(model.localizedTitle(for: .newChat)) {
                     model.performAppAction(.newChat)
                 }
                 .keybindingShortcut(.newChat)
                 .disabled(!model.canPerformAppAction(.newChat))
 
-                Button(DefaultKeymap.title(for: .openProject) ?? "Open project") {
+                Button(model.localizedTitle(for: .openProject)) {
                     model.performAppAction(.openProject)
                 }
                 .keybindingShortcut(.openProject)
                 .disabled(!model.canPerformAppAction(.openProject))
 
-                Button(DefaultKeymap.title(for: .openCommandPalette) ?? "Open Command Palette") {
+                Button(model.localizedTitle(for: .openCommandPalette)) {
                     model.performAppAction(.openCommandPalette)
                 }
                 .keybindingShortcut(.openCommandPalette)
@@ -35,13 +35,13 @@ struct PiAgentNativeApp: App {
 
                 Divider()
 
-                Button(DefaultKeymap.title(for: .focusComposer) ?? "Focus composer") {
+                Button(model.localizedTitle(for: .focusComposer)) {
                     model.performAppAction(.focusComposer)
                 }
                 .keybindingShortcut(.focusComposer)
                 .disabled(!model.canPerformAppAction(.focusComposer))
 
-                Button(DefaultKeymap.title(for: .refreshState) ?? "Refresh state") {
+                Button(model.localizedTitle(for: .refreshState)) {
                     model.performAppAction(.refreshState)
                 }
                 .keybindingShortcut(.refreshState)
@@ -49,19 +49,19 @@ struct PiAgentNativeApp: App {
 
                 Divider()
 
-                Button(DefaultKeymap.title(for: .openProcessLog) ?? "Open process log") {
+                Button(model.localizedTitle(for: .openProcessLog)) {
                     model.performAppAction(.openProcessLog)
                 }
                 .keybindingShortcut(.openProcessLog)
                 .disabled(!model.canPerformAppAction(.openProcessLog))
 
-                Button(DefaultKeymap.title(for: .openKeybindingHelp) ?? "Open Keyboard Shortcuts") {
+                Button(model.localizedTitle(for: .openKeybindingHelp)) {
                     model.performAppAction(.openKeybindingHelp)
                 }
                 .keybindingShortcut(.openKeybindingHelp)
                 .disabled(!model.canPerformAppAction(.openKeybindingHelp))
 
-                Button(DefaultKeymap.title(for: .openSettings) ?? "Open settings") {
+                Button(model.localizedTitle(for: .openSettings)) {
                     model.performAppAction(.openSettings)
                 }
                 .keybindingShortcut(.openSettings)
@@ -69,13 +69,13 @@ struct PiAgentNativeApp: App {
 
                 Divider()
 
-                Button(DefaultKeymap.title(for: .toggleSidebar) ?? "Toggle sidebar") {
+                Button(model.localizedTitle(for: .toggleSidebar)) {
                     model.performAppAction(.toggleSidebar)
                 }
                 .keybindingShortcut(.toggleSidebar)
                 .disabled(!model.canPerformAppAction(.toggleSidebar))
 
-                Button(DefaultKeymap.title(for: .toggleInspector) ?? "Toggle inspector") {
+                Button(model.localizedTitle(for: .toggleInspector)) {
                     model.performAppAction(.toggleInspector)
                 }
                 .keybindingShortcut(.toggleInspector)
@@ -83,12 +83,12 @@ struct PiAgentNativeApp: App {
 
                 Divider()
 
-                Button("Start Pi RPC") {
+                Button(model.startPiRPCMenuTitle) {
                     model.start()
                 }
                 .disabled(model.isConnected)
 
-                Button("Stop Pi RPC") {
+                Button(model.stopPiRPCMenuTitle) {
                     model.stop()
                 }
                 .disabled(!model.isConnected)

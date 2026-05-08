@@ -154,4 +154,19 @@ final class QueuedWorkDisplayStateTests: XCTestCase {
         XCTAssertEqual(model.pendingMessageCount, 0)
         XCTAssertEqual(model.queuedWorkDisplayState, .empty)
     }
+
+    func testLocalizedQueuedWorkEntryCopyDoesNotChangeRawQueuedText() {
+        let entry = QueuedWorkEntry(kind: .steering, text: "  Preserve   /tmp/Projeto Bruto %@  ", position: 0)
+        let empty = QueuedWorkEntry(kind: .followUp, text: "   ", position: 0)
+        let portuguese = L10n(language: .portugueseBrazil)
+
+        XCTAssertEqual(entry.title(l10n: portuguese), "Direcionamento")
+        XCTAssertEqual(entry.text, "  Preserve   /tmp/Projeto Bruto %@  ")
+        XCTAssertEqual(entry.summary(l10n: portuguese), "Preserve /tmp/Projeto Bruto %@")
+        let truncated = entry.summary(maxLength: 12, l10n: portuguese)
+        XCTAssertEqual(truncated, "Preserve ...")
+        XCTAssertLessThanOrEqual(truncated.count, 12)
+        XCTAssertEqual(empty.title(l10n: portuguese), "Seguimento")
+        XCTAssertEqual(empty.summary(l10n: portuguese), "Mensagem vazia na fila")
+    }
 }

@@ -96,6 +96,42 @@ public final class AppModel: ObservableObject {
         set { settingsStore.customExecutablePath = newValue }
     }
 
+    var appLanguage: AppLanguage {
+        get { settingsStore.appLanguage }
+        set { settingsStore.appLanguage = newValue }
+    }
+
+    var l10n: L10n {
+        L10n(language: appLanguage)
+    }
+
+    private func appString(_ key: String, _ args: CVarArg...) -> String {
+        l10n.string(key, arguments: args)
+    }
+
+    private func appPlural(_ key: String, count: Int) -> String {
+        l10n.plural(key, count: count)
+    }
+
+    private func appStringList(_ key: String) -> [String] {
+        appString(key)
+            .split(separator: ";")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    public func localizedTitle(for actionID: AppActionID) -> String {
+        DefaultKeymap.title(for: actionID, l10n: l10n) ?? DefaultKeymap.title(for: actionID) ?? actionID.rawValue
+    }
+
+    public var startPiRPCMenuTitle: String {
+        appString("app_menu.start_pi_rpc")
+    }
+
+    public var stopPiRPCMenuTitle: String {
+        appString("app_menu.stop_pi_rpc")
+    }
+
     var messages: [ChatMessage] {
         get { conversationStore.messages }
         set { conversationStore.messages = newValue }
@@ -171,6 +207,7 @@ public final class AppModel: ObservableObject {
         uiFontSize = min(max(storedFontSize ?? 15, 12), 20)
         themeFamily = storedThemeFamily ?? .nord
         themeVariant = storedThemeVariant ?? legacyThemeMode ?? .dark
+        applyLocalizedInitialState()
 
         if let selectedProjectID = persistedSelectedProjectID,
            let selectedProject = workspaceStore.selectedProject {
@@ -208,14 +245,32 @@ public final class AppModel: ObservableObject {
             self.isStreaming = false
             self.clearQueuedWork()
             self.availableSkills = []
-            self.skillAvailability = .unavailable("Skills unavailable")
+            self.skillAvailability = .unavailable(self.appString("app_model.status.skills_unavailable"))
             self.pendingSelectedSkills.removeAll()
             self.highlightedSkillID = nil
             self.dismissedSkillQuery = nil
             self.clearAuthDerivedState(authentication: self.authenticationStateFromCredentialStore())
-            self.statusText = status == 0 ? "Stopped" : "Exited with status \(status)"
-            self.appendLog(title: "process exited", detail: "status \(status)")
+            self.statusText = status == 0
+                ? self.appString("app_model.status.stopped")
+                : self.appString("app_model.status.exited_with_status", status)
+            self.appendLog(
+                title: self.appString("app_model.log.title.process_exited"),
+                detail: self.appString("app_model.log.detail.exit_status", status)
+            )
         }
+    }
+
+    private func applyLocalizedInitialState() {
+        sessionTitle = appString("app_model.session.new_chat")
+        statusText = appString("app_model.status.disconnected")
+        launchDetail = appString("app_model.launch_detail.not_started")
+        modelName = appString("app_model.model.no_model")
+        gitDetails = GitBranchDetails(
+            branch: appString("app_model.git.no_project_selected"),
+            hasChanges: false,
+            changeSummary: appString("app_model.git.open_project")
+        )
+        repositoryChangeSnapshot = .unavailable(reason: appString("app_model.change_review.open_project"))
     }
 
     private func bindStoreChanges() {
@@ -270,7 +325,7 @@ public final class AppModel: ObservableObject {
                 query: query,
                 results: [],
                 highlightedSkillID: nil,
-                status: .unavailable("Skills loading")
+                status: .unavailable(appString("app_model.status.skills_loading"))
             )
         case .unavailable(let message):
             return SkillPickerState(
@@ -296,8 +351,8 @@ public final class AppModel: ObservableObject {
     public func start() {
         clearQueuedWork()
         guard let selectedProject else {
-            statusText = "Open a project"
-            launchDetail = "Choose a project folder before starting pi"
+            statusText = appString("app_model.status.open_project")
+            launchDetail = appString("app_model.launch_detail.choose_project")
             return
         }
 
@@ -313,9 +368,9 @@ public final class AppModel: ObservableObject {
             )
             let launch = try client.start(workspacePath: selectedProject.path, customExecutable: customExecutablePath)
             isConnected = true
-            statusText = "Connected"
+            statusText = appString("app_model.status.connected")
             launchDetail = "\(launch.displayName): \(launch.diagnostic)"
-            appendLog(title: "started pi rpc", detail: "\(launch.diagnostic) --mode rpc")
+            appendLog(title: appString("app_model.log.title.started_pi_rpc"), detail: "\(launch.diagnostic) --mode rpc")
             beginAccessRefresh(reason: "pi rpc start")
             sendCommand(.getCommands())
             if shouldSwitchToStoredSessionAfterStart,
@@ -326,14 +381,14 @@ public final class AppModel: ObservableObject {
             }
         } catch {
             isConnected = false
-            statusText = "Launch failed"
-            skillAvailability = .unavailable("Skills unavailable")
+            statusText = appString("app_model.status.launch_failed")
+            skillAvailability = .unavailable(appString("app_model.status.skills_unavailable"))
             clearAuthDerivedState(
                 authentication: authenticationStateFromCredentialStore(),
                 modelAccess: .failed(message: error.localizedDescription),
                 subscriptionAccess: .failed(message: error.localizedDescription)
             )
-            appendLog(title: "launch failed", detail: error.localizedDescription)
+            appendLog(title: appString("app_model.log.title.launch_failed"), detail: error.localizedDescription)
         }
     }
 
@@ -342,7 +397,7 @@ public final class AppModel: ObservableObject {
         isConnected = false
         isStreaming = false
         clearQueuedWork()
-        statusText = "Stopped"
+        statusText = appString("app_model.status.stopped")
         clearSkillSelectionState(clearAvailableSkills: true)
         clearAuthDerivedState(authentication: authenticationStateFromCredentialStore())
     }
@@ -352,7 +407,7 @@ public final class AppModel: ObservableObject {
         guard !prompt.isEmpty || !pendingContextAttachments.isEmpty else { return }
         guard !isStreaming else { return }
         guard selectedProject != nil else {
-            statusText = "Open a project"
+            statusText = appString("app_model.status.open_project")
             return
         }
         guard !isCreatingNewSession else { return }
@@ -367,14 +422,14 @@ public final class AppModel: ObservableObject {
             if !isConnected {
                 start()
             }
-            if let message = authAccess.sendPromptUnavailableMessage {
-                statusText = "Model access unavailable"
-                appendLog(title: "prompt blocked", detail: message)
+            if let message = authAccess.sendPromptUnavailableMessage(l10n: l10n) {
+                statusText = appString("app_model.status.model_access_unavailable")
+                appendLog(title: appString("app_model.log.title.prompt_blocked"), detail: message)
                 return
             }
         case .invalid(let message):
-            statusText = "Invalid skill command"
-            appendLog(title: "skill selection failed", detail: message)
+            statusText = appString("app_model.status.invalid_skill_command")
+            appendLog(title: appString("app_model.log.title.skill_selection_failed"), detail: message)
             return
         case .selection(let skillIDs):
             if !isConnected {
@@ -392,12 +447,12 @@ public final class AppModel: ObservableObject {
             )
             rpcPrompt = try SkillPromptDecorator.decoratedPrompt(userPrompt: attachmentPrompt, skills: pendingSelectedSkills)
         } catch {
-            statusText = "Skill expansion failed"
-            appendLog(title: "skill expansion failed", detail: error.localizedDescription)
+            statusText = appString("app_model.status.skill_expansion_failed")
+            appendLog(title: appString("app_model.log.title.skill_expansion_failed"), detail: error.localizedDescription)
             return
         }
 
-        messages.append(ChatMessage(role: .user, title: "You", text: prompt))
+        messages.append(ChatMessage(role: .user, title: appString("chat.message.title.you"), text: prompt))
         closeMentionPicker()
         if shouldReplaceGeneratedTitle(sessionTitle) {
             sessionTitle = prompt.truncatedSessionTitle()
@@ -419,7 +474,7 @@ public final class AppModel: ObservableObject {
 
     public func newSession() {
         guard selectedProject != nil else {
-            statusText = "Open a project"
+            statusText = appString("app_model.status.open_project")
             return
         }
         persistCurrentSessionSnapshot()
@@ -427,8 +482,8 @@ public final class AppModel: ObservableObject {
         conversationStore.clear()
         toolActivityStore.clear()
         clearQueuedWork(waitForContextRefresh: true)
-        sessionTitle = "New chat"
-        statusText = isConnected ? "Ready" : statusText
+        sessionTitle = appString("app_model.session.new_chat")
+        statusText = isConnected ? appString("app_model.status.ready") : statusText
         isCreatingNewSession = false
         isSwitchingSession = false
         pendingPromptAfterNewSession = nil
@@ -514,9 +569,9 @@ public final class AppModel: ObservableObject {
     private func explainUnavailableAppAction(_ actionID: AppActionID) {
         guard actionID == .sendPrompt else { return }
         let prompt = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard submissionRequiresModelAccess(prompt), let message = authAccess.sendPromptUnavailableMessage else { return }
-        statusText = "Model access unavailable"
-        appendLog(title: "prompt blocked", detail: message)
+        guard submissionRequiresModelAccess(prompt), let message = authAccess.sendPromptUnavailableMessage(l10n: l10n) else { return }
+        statusText = appString("app_model.status.model_access_unavailable")
+        appendLog(title: appString("app_model.log.title.prompt_blocked"), detail: message)
     }
 
     private func submissionRequiresModelAccess(_ prompt: String) -> Bool {
@@ -550,8 +605,8 @@ public final class AppModel: ObservableObject {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "Open"
-        panel.message = "Choose a project folder"
+        panel.prompt = appString("app_model.open_panel.prompt")
+        panel.message = appString("app_model.open_panel.message")
 
         if panel.runModal() == .OK, let url = panel.url {
             addProject(path: url.path)
@@ -579,9 +634,12 @@ public final class AppModel: ObservableObject {
 
     @discardableResult
     func requireSubscriptionAccess(actionName: String) -> Bool {
-        guard let message = authAccess.subscriptionGateUnavailableMessage else { return true }
-        statusText = "Subscription access unavailable"
-        appendLog(title: "subscription action blocked", detail: "action=\(actionName) \(message)")
+        guard let message = authAccess.subscriptionGateUnavailableMessage(l10n: l10n) else { return true }
+        statusText = appString("app_model.status.subscription_access_unavailable")
+        appendLog(
+            title: appString("app_model.log.title.subscription_action_blocked"),
+            detail: appString("app_model.log.detail.subscription_action_blocked", actionName, message)
+        )
         return false
     }
 
@@ -622,7 +680,7 @@ public final class AppModel: ObservableObject {
 
     func showCommandPalette() {
         guard !hasActiveModalExcludingCommandPalette else {
-            statusText = "Close active modal first"
+            statusText = appString("app_model.status.close_active_modal_first")
             return
         }
 
@@ -643,9 +701,9 @@ public final class AppModel: ObservableObject {
         items.append(contentsOf: projects.map { project in
             CommandPaletteItem(
                 id: "project:\(project.id)",
-                title: "Switch project: \(project.name)",
+                title: appString("command_palette.project.title", project.name),
                 subtitle: project.path,
-                keywords: ["project", "workspace", "switch", project.name, project.path],
+                keywords: appStringList("command_palette.project.keywords") + [project.name, project.path],
                 iconSystemName: "folder",
                 keybindingLabel: nil,
                 availability: .enabled,
@@ -657,9 +715,9 @@ public final class AppModel: ObservableObject {
             items.append(contentsOf: sessionsForProject(selectedProject).map { session in
                 CommandPaletteItem(
                     id: "session:\(session.id)",
-                    title: "Switch session: \(session.title)",
+                    title: appString("command_palette.session.title", session.title),
                     subtitle: session.status,
-                    keywords: ["session", "chat", selectedProject.name, session.title, session.status],
+                    keywords: appStringList("command_palette.session.keywords") + [selectedProject.name, session.title, session.status],
                     iconSystemName: "bubble.left.and.text.bubble.right",
                     keybindingLabel: nil,
                     availability: .enabled,
@@ -671,9 +729,9 @@ public final class AppModel: ObservableObject {
         items.append(contentsOf: availableModels.map { model in
             CommandPaletteItem(
                 id: "model:\(model.provider):\(model.modelId)",
-                title: "Select model: \(model.displayName)",
+                title: appString("command_palette.model.title", model.displayName),
                 subtitle: model.id,
-                keywords: ["model", "provider", model.provider, model.modelId, model.name],
+                keywords: appStringList("command_palette.model.keywords") + [model.provider, model.modelId, model.name],
                 iconSystemName: "cpu",
                 keybindingLabel: nil,
                 availability: .enabled,
@@ -684,9 +742,9 @@ public final class AppModel: ObservableObject {
         items.append(contentsOf: CommandPaletteCatalog.thinkingLevels.map { level in
             CommandPaletteItem(
                 id: "thinking:\(level)",
-                title: "Set thinking: \(level.capitalized)",
-                subtitle: level == thinkingLevel ? "Current thinking level" : nil,
-                keywords: ["thinking", "reasoning", level],
+                title: appString("command_palette.thinking.title", localizedThinkingLevelDisplay(level)),
+                subtitle: level == thinkingLevel ? appString("command_palette.thinking.current") : nil,
+                keywords: appStringList("command_palette.thinking.keywords") + [level, localizedThinkingLevelDisplay(level)],
                 iconSystemName: "brain.head.profile",
                 keybindingLabel: nil,
                 availability: .enabled,
@@ -698,9 +756,9 @@ public final class AppModel: ObservableObject {
             items.append(contentsOf: availableExternalTargets.map { target in
                 CommandPaletteItem(
                     id: "external:\(target.id.rawValue)",
-                    title: "Open externally: \(target.displayName)",
+                    title: appString("command_palette.external.title", target.displayName),
                     subtitle: selectedProject?.path,
-                    keywords: ["open", "external", "editor", target.displayName, target.id.rawValue],
+                    keywords: appStringList("command_palette.external.keywords") + [target.displayName, target.id.rawValue],
                     iconSystemName: target.fallbackSystemImage,
                     keybindingLabel: nil,
                     availability: .enabled,
@@ -751,12 +809,12 @@ public final class AppModel: ObservableObject {
     func runCommandPaletteItem(_ item: CommandPaletteItem) {
         let availability = commandPaletteAvailability(for: item.invocation)
         guard availability.isEnabled else {
-            statusText = availability.disabledReason ?? "Command unavailable"
+            statusText = availability.disabledReason ?? appString("app_model.status.command_unavailable")
             return
         }
 
         guard let resolvedInvocation = resolveCommandPaletteInvocation(item.invocation) else {
-            statusText = "Command unavailable"
+            statusText = appString("app_model.status.command_unavailable")
             return
         }
 
@@ -765,39 +823,99 @@ public final class AppModel: ObservableObject {
     }
 
     private func staticCommandPaletteItems() -> [CommandPaletteItem] {
-        let staticActions: [(AppActionID, String, String?, [String], String)] = [
-            (.newChat, "New chat", "Start a new chat in the selected project", ["new", "chat", "session"], "square.and.pencil"),
-            (.openProject, "Open project", "Choose a project folder", ["open", "project", "folder", "workspace"], "folder.badge.plus"),
-            (.focusComposer, "Focus composer", "Move keyboard focus to the prompt composer", ["focus", "composer", "prompt"], "text.cursor"),
-            (.refreshState, "Refresh state", "Refresh Pi state, commands, and project details", ["refresh", "reload", "state"], "arrow.clockwise"),
-            (.openSettings, "Open settings", nil, ["settings", "preferences"], "gearshape"),
-            (.openProcessLog, "Open process log", nil, ["process", "log", "debug"], "list.bullet.rectangle"),
-            (.openKeybindingHelp, "Open Keyboard Shortcuts", nil, ["keyboard", "shortcuts", "help"], "keyboard"),
-            (.toggleSidebar, "Toggle sidebar", nil, ["sidebar", "left", "projects"], "sidebar.left"),
-            (.toggleInspector, "Toggle inspector", nil, ["inspector", "right", "details"], "sidebar.right"),
-            (.sendPrompt, "Send prompt", nil, ["send", "submit", "prompt"], "paperplane"),
-            (.stopGeneration, "Stop generation", nil, ["stop", "abort", "cancel", "generation"], "stop.fill"),
-            (.cycleThinkingLevel, "Cycle thinking level", nil, ["thinking", "reasoning", "cycle"], "brain.head.profile")
+        let staticActions: [StaticCommandPaletteAction] = [
+            StaticCommandPaletteAction(
+                actionID: .newChat,
+                subtitleKey: "command_palette.action.new_chat.subtitle",
+                keywordsKey: "command_palette.action.new_chat.keywords",
+                iconSystemName: "square.and.pencil"
+            ),
+            StaticCommandPaletteAction(
+                actionID: .openProject,
+                subtitleKey: "command_palette.action.open_project.subtitle",
+                keywordsKey: "command_palette.action.open_project.keywords",
+                iconSystemName: "folder.badge.plus"
+            ),
+            StaticCommandPaletteAction(
+                actionID: .focusComposer,
+                subtitleKey: "command_palette.action.focus_composer.subtitle",
+                keywordsKey: "command_palette.action.focus_composer.keywords",
+                iconSystemName: "text.cursor"
+            ),
+            StaticCommandPaletteAction(
+                actionID: .refreshState,
+                subtitleKey: "command_palette.action.refresh_state.subtitle",
+                keywordsKey: "command_palette.action.refresh_state.keywords",
+                iconSystemName: "arrow.clockwise"
+            ),
+            StaticCommandPaletteAction(
+                actionID: .openSettings,
+                subtitleKey: nil,
+                keywordsKey: "command_palette.action.open_settings.keywords",
+                iconSystemName: "gearshape"
+            ),
+            StaticCommandPaletteAction(
+                actionID: .openProcessLog,
+                subtitleKey: nil,
+                keywordsKey: "command_palette.action.open_process_log.keywords",
+                iconSystemName: "list.bullet.rectangle"
+            ),
+            StaticCommandPaletteAction(
+                actionID: .openKeybindingHelp,
+                subtitleKey: nil,
+                keywordsKey: "command_palette.action.open_keybinding_help.keywords",
+                iconSystemName: "keyboard"
+            ),
+            StaticCommandPaletteAction(
+                actionID: .toggleSidebar,
+                subtitleKey: nil,
+                keywordsKey: "command_palette.action.toggle_sidebar.keywords",
+                iconSystemName: "sidebar.left"
+            ),
+            StaticCommandPaletteAction(
+                actionID: .toggleInspector,
+                subtitleKey: nil,
+                keywordsKey: "command_palette.action.toggle_inspector.keywords",
+                iconSystemName: "sidebar.right"
+            ),
+            StaticCommandPaletteAction(
+                actionID: .sendPrompt,
+                subtitleKey: nil,
+                keywordsKey: "command_palette.action.send_prompt.keywords",
+                iconSystemName: "paperplane"
+            ),
+            StaticCommandPaletteAction(
+                actionID: .stopGeneration,
+                subtitleKey: nil,
+                keywordsKey: "command_palette.action.stop_generation.keywords",
+                iconSystemName: "stop.fill"
+            ),
+            StaticCommandPaletteAction(
+                actionID: .cycleThinkingLevel,
+                subtitleKey: nil,
+                keywordsKey: "command_palette.action.cycle_thinking_level.keywords",
+                iconSystemName: "brain.head.profile"
+            )
         ]
 
-        var items = staticActions.map { actionID, title, subtitle, keywords, icon in
+        var items = staticActions.map { action in
             CommandPaletteItem(
-                id: "action:\(actionID.rawValue)",
-                title: title,
-                subtitle: subtitle,
-                keywords: keywords,
-                iconSystemName: icon,
-                keybindingLabel: DefaultKeymap.displayLabel(for: actionID),
-                availability: commandPaletteAvailability(for: .appAction(actionID)),
-                invocation: .appAction(actionID)
+                id: "action:\(action.actionID.rawValue)",
+                title: localizedTitle(for: action.actionID),
+                subtitle: action.subtitleKey.map { appString($0) },
+                keywords: appStringList(action.keywordsKey),
+                iconSystemName: action.iconSystemName,
+                keybindingLabel: DefaultKeymap.displayLabel(for: action.actionID),
+                availability: commandPaletteAvailability(for: .appAction(action.actionID)),
+                invocation: .appAction(action.actionID)
             )
         }
 
         items.append(CommandPaletteItem(
             id: "login",
-            title: "Login",
-            subtitle: "Manage authentication",
-            keywords: ["login", "auth", "authentication", "account"],
+            title: appString("command_palette.login.title"),
+            subtitle: appString("command_palette.login.subtitle"),
+            keywords: appStringList("command_palette.login.keywords"),
             iconSystemName: "key",
             keybindingLabel: nil,
             availability: commandPaletteAvailability(for: .showLogin),
@@ -806,9 +924,9 @@ public final class AppModel: ObservableObject {
 
         items.append(CommandPaletteItem(
             id: "model-picker",
-            title: "Select model",
+            title: appString("command_palette.model_picker.title"),
             subtitle: modelName,
-            keywords: ["select", "model", "provider", modelName],
+            keywords: appStringList("command_palette.model_picker.keywords") + [modelName],
             iconSystemName: "cpu",
             keybindingLabel: nil,
             availability: commandPaletteAvailability(for: .showModelPicker),
@@ -816,6 +934,25 @@ public final class AppModel: ObservableObject {
         ))
 
         return items
+    }
+
+    private func localizedThinkingLevelDisplay(_ level: String) -> String {
+        switch level {
+        case "off":
+            return appString("command_palette.thinking.level.off")
+        case "minimal":
+            return appString("command_palette.thinking.level.minimal")
+        case "low":
+            return appString("command_palette.thinking.level.low")
+        case "medium":
+            return appString("command_palette.thinking.level.medium")
+        case "high":
+            return appString("command_palette.thinking.level.high")
+        case "xhigh":
+            return appString("command_palette.thinking.level.xhigh")
+        default:
+            return level
+        }
     }
 
     private func commandPaletteAvailability(for invocation: CommandPaletteInvocation) -> CommandPaletteAvailability {
@@ -829,68 +966,70 @@ public final class AppModel: ObservableObject {
         case .selectProject(let projectID):
             return projects.contains(where: { $0.id == projectID })
                 ? .enabled
-                : .disabled(reason: "Project is no longer available")
+                : .disabled(reason: appString("app_model.availability.project_no_longer_available"))
 
         case .switchSession(let sessionID):
             guard let selectedProject else {
-                return .disabled(reason: "Open a project first")
+                return .disabled(reason: appString("app_model.availability.open_project_first"))
             }
             return sessionsForProject(selectedProject).contains(where: { $0.id == sessionID })
                 ? .enabled
-                : .disabled(reason: "Session is no longer available")
+                : .disabled(reason: appString("app_model.availability.session_no_longer_available"))
 
         case .selectModel(let provider, let modelID):
             return availableModels.contains { $0.provider == provider && $0.modelId == modelID }
                 ? .enabled
-                : .disabled(reason: "Model is no longer available")
+                : .disabled(reason: appString("app_model.availability.model_no_longer_available"))
 
         case .setThinkingLevel(let level):
             return CommandPaletteCatalog.thinkingLevels.contains(level)
                 ? .enabled
-                : .disabled(reason: "Thinking level is not supported")
+                : .disabled(reason: appString("app_model.availability.thinking_level_not_supported"))
 
         case .openExternalTarget(let targetID):
             guard selectedProject != nil else {
-                return .disabled(reason: "Open a project first")
+                return .disabled(reason: appString("app_model.availability.open_project_first"))
             }
             return availableExternalTargets.contains(where: { $0.id == targetID })
                 ? .enabled
-                : .disabled(reason: "External target is no longer available")
+                : .disabled(reason: appString("app_model.availability.external_target_no_longer_available"))
 
         case .showLogin, .showModelPicker:
-            return hasActiveModalExcludingCommandPalette ? .disabled(reason: "Close active modal first") : .enabled
+            return hasActiveModalExcludingCommandPalette
+                ? .disabled(reason: appString("app_model.status.close_active_modal_first"))
+                : .enabled
         }
     }
 
     private func unavailableReason(for actionID: AppActionID) -> String {
         if hasActiveModalExcludingCommandPalette {
-            return "Close active modal first"
+            return appString("app_model.status.close_active_modal_first")
         }
 
         switch actionID {
         case .newChat, .refreshState:
-            return "Open a project first"
+            return appString("app_model.availability.open_project_first")
         case .sendPrompt:
             if selectedProject == nil {
-                return "Open a project first"
+                return appString("app_model.availability.open_project_first")
             }
             if isStreaming {
-                return "Generation is already running"
+                return appString("app_model.availability.generation_already_running")
             }
             if isCreatingNewSession {
-                return "Wait for the new chat to be created"
+                return appString("app_model.availability.wait_new_chat")
             }
             if composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return "Enter a prompt first"
+                return appString("app_model.availability.enter_prompt_first")
             }
-            if let message = authAccess.sendPromptUnavailableMessage {
+            if let message = authAccess.sendPromptUnavailableMessage(l10n: l10n) {
                 return message
             }
-            return "Prompt cannot be sent"
+            return appString("app_model.availability.prompt_cannot_be_sent")
         case .stopGeneration:
-            return "Nothing is running"
+            return appString("app_model.availability.nothing_running")
         case .closeActiveModal:
-            return "No active modal"
+            return appString("app_model.availability.no_active_modal")
         case .openProject,
              .openCommandPalette,
              .focusComposer,
@@ -901,7 +1040,7 @@ public final class AppModel: ObservableObject {
              .toggleInspector,
              .insertComposerNewline,
              .cycleThinkingLevel:
-            return "Command unavailable"
+            return appString("app_model.status.command_unavailable")
         }
     }
 
@@ -980,7 +1119,7 @@ public final class AppModel: ObservableObject {
 
     func openChangeReview() {
         guard selectedProject != nil else {
-            repositoryChangeSnapshot = .unavailable(reason: "Open a project to review changes.")
+            repositoryChangeSnapshot = .unavailable(reason: appString("app_model.change_review.open_project"))
             return
         }
         isShowingChangeReview = true
@@ -1004,11 +1143,11 @@ public final class AppModel: ObservableObject {
     }
 
     func previousSessionHelpText() -> String {
-        sessionNavigationUnavailableReason(for: .previous) ?? SessionNavigationDirection.previous.title
+        sessionNavigationUnavailableReason(for: .previous) ?? appString("app_model.session.previous")
     }
 
     func nextSessionHelpText() -> String {
-        sessionNavigationUnavailableReason(for: .next) ?? SessionNavigationDirection.next.title
+        sessionNavigationUnavailableReason(for: .next) ?? appString("app_model.session.next")
     }
 
     private func navigateSession(_ direction: SessionNavigationDirection) {
@@ -1034,29 +1173,29 @@ public final class AppModel: ObservableObject {
 
     private func sessionNavigationUnavailableReason(for direction: SessionNavigationDirection) -> String? {
         if hasActiveModal {
-            return "Close active modal first"
+            return appString("app_model.status.close_active_modal_first")
         }
 
         guard let selectedProject else {
-            return "Open a project first"
+            return appString("app_model.availability.open_project_first")
         }
 
         guard let selectedSessionID else {
-            return "Select a session first"
+            return appString("app_model.availability.select_session_first")
         }
 
         let projectSessions = sessionsForProject(selectedProject)
         guard projectSessions.count > 1 else {
-            return "No other sessions"
+            return appString("app_model.availability.no_other_sessions")
         }
 
         guard let currentIndex = projectSessions.firstIndex(where: { $0.id == selectedSessionID }) else {
-            return "Select a session in this project first"
+            return appString("app_model.availability.select_session_in_project_first")
         }
 
         let adjacentIndex = currentIndex + direction.offset
         guard projectSessions.indices.contains(adjacentIndex) else {
-            return direction.boundaryReason
+            return sessionNavigationBoundaryReason(for: direction)
         }
 
         return nil
@@ -1150,7 +1289,10 @@ public final class AppModel: ObservableObject {
             modelAccess: .refreshing,
             subscriptionAccess: .refreshing
         )
-        appendLog(title: "saved api key", detail: "Credentials saved to \(NativeAuthStore.authFileURL.path)")
+        appendLog(
+            title: appString("app_model.log.title.saved_api_key"),
+            detail: appString("app_model.log.detail.credentials_saved", NativeAuthStore.authFileURL.path)
+        )
         restartRPC()
     }
 
@@ -1164,14 +1306,17 @@ public final class AppModel: ObservableObject {
             }
             try NativeAuthStore.removeCredential(provider: provider.id)
             clearAuthDerivedState(authentication: authenticationStateFromCredentialStore())
-            appendLog(title: "logged out", detail: "Removed credentials for \(provider.name)")
+            appendLog(
+                title: appString("app_model.log.title.logged_out"),
+                detail: appString("app_model.log.detail.removed_credentials", provider.name)
+            )
             restartRPC()
         } catch {
             authAccess.authentication = .failed(message: error.localizedDescription)
             authAccess.modelAccess = .failed(message: error.localizedDescription)
             authAccess.subscriptionAccess = .failed(message: error.localizedDescription)
-            statusText = "Logout failed"
-            appendLog(title: "logout failed", detail: error.localizedDescription)
+            statusText = appString("app_model.status.logout_failed")
+            appendLog(title: appString("app_model.log.title.logout_failed"), detail: error.localizedDescription)
         }
     }
 
@@ -1181,8 +1326,11 @@ public final class AppModel: ObservableObject {
             modelAccess: .refreshing,
             subscriptionAccess: .refreshing
         )
-        statusText = "Login in progress"
-        appendLog(title: "subscription login", detail: "Starting login for \(provider.name)")
+        statusText = appString("app_model.status.login_in_progress")
+        appendLog(
+            title: appString("app_model.log.title.subscription_login"),
+            detail: appString("app_model.log.detail.starting_login", provider.name)
+        )
         switch oauthLoginRunner.start(provider: provider) {
         case .success:
             break
@@ -1197,8 +1345,11 @@ public final class AppModel: ObservableObject {
             return
         }
         oauthLoginRunner.stop()
-        statusText = "Stopping login"
-        appendLog(title: "subscription login", detail: "Stopping login for \(provider.name)")
+        statusText = appString("app_model.status.stopping_login")
+        appendLog(
+            title: appString("app_model.log.title.subscription_login"),
+            detail: appString("app_model.log.detail.stopping_login", provider.name)
+        )
     }
 
     func dismissLoginSheet() {
@@ -1221,10 +1372,16 @@ public final class AppModel: ObservableObject {
                 modelAccess: .refreshing,
                 subscriptionAccess: .refreshing
             )
-            appendLog(title: "subscription login", detail: "Login for \(provider.name) finished; restarting pi RPC")
+            appendLog(
+                title: appString("app_model.log.title.subscription_login"),
+                detail: appString("app_model.log.detail.login_finished_restart", provider.name)
+            )
             restartRPC()
         } else {
-            completeFailedSubscriptionLogin(provider: provider, message: "Login exited with status \(exitStatus).")
+            completeFailedSubscriptionLogin(
+                provider: provider,
+                message: appString("app_model.error.login_exited_status", exitStatus)
+            )
         }
     }
 
@@ -1236,9 +1393,12 @@ public final class AppModel: ObservableObject {
             subscriptionAccess: .failed(message: message)
         )
         availableModels.removeAll()
-        modelName = "No model"
-        statusText = "Login failed"
-        appendLog(title: "subscription login failed", detail: "provider=\(provider.name) \(message)")
+        modelName = appString("app_model.model.no_model")
+        statusText = appString("app_model.status.login_failed")
+        appendLog(
+            title: appString("app_model.log.title.subscription_login_failed"),
+            detail: appString("app_model.log.detail.provider_message", provider.name, message)
+        )
     }
 
     func selectProject(_ project: ProjectItem) {
@@ -1258,8 +1418,8 @@ public final class AppModel: ObservableObject {
         selectedSessionID = nil
         conversationStore.clear()
         toolActivityStore.clear()
-        sessionTitle = "New chat"
-        statusText = isConnected ? "Ready" : statusText
+        sessionTitle = appString("app_model.session.new_chat")
+        statusText = isConnected ? appString("app_model.status.ready") : statusText
         isCreatingNewSession = false
         isSwitchingSession = false
         pendingPromptAfterNewSession = nil
@@ -1326,7 +1486,7 @@ public final class AppModel: ObservableObject {
 
     func openExternally(_ target: AvailableExternalTarget) {
         guard let selectedProject else {
-            statusText = "Open a project"
+            statusText = appString("app_model.status.open_project")
             return
         }
 
@@ -1335,10 +1495,15 @@ public final class AppModel: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 if case .failure(let error) = result {
-                    self.statusText = "Could not open in \(target.displayName)"
+                    self.statusText = self.appString("app_model.status.could_not_open_in", target.displayName)
                     self.appendLog(
-                        title: "open externally failed",
-                        detail: "target=\(target.displayName) projectPath=\(projectPath) error=\(error.localizedDescription)"
+                        title: self.appString("app_model.log.title.open_externally_failed"),
+                        detail: self.appString(
+                            "app_model.log.detail.open_externally_failed",
+                            target.displayName,
+                            projectPath,
+                            error.localizedDescription
+                        )
                     )
                 }
             }
@@ -1347,7 +1512,7 @@ public final class AppModel: ObservableObject {
 
     func openChangedFileExternally(_ file: ChangedFile, target: AvailableExternalTarget) {
         guard let selectedProject else {
-            statusText = "Open a project"
+            statusText = appString("app_model.status.open_project")
             return
         }
 
@@ -1357,10 +1522,15 @@ public final class AppModel: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 if case .failure(let error) = result {
-                    self.statusText = "Could not open \(file.path) in \(target.displayName)"
+                    self.statusText = self.appString("app_model.status.could_not_open_file_in", file.path, target.displayName)
                     self.appendLog(
-                        title: "open changed file failed",
-                        detail: "target=\(target.displayName) path=\(launchPath) error=\(error.localizedDescription)"
+                        title: self.appString("app_model.log.title.open_changed_file_failed"),
+                        detail: self.appString(
+                            "app_model.log.detail.open_changed_file_failed",
+                            target.displayName,
+                            launchPath,
+                            error.localizedDescription
+                        )
                     )
                 }
             }
@@ -1623,10 +1793,12 @@ public final class AppModel: ObservableObject {
         let invalidAttachments = pendingContextAttachments.filter { !$0.status.isValid }
         guard !invalidAttachments.isEmpty else { return true }
 
-        statusText = invalidAttachments.count == 1 ? "Attachment unavailable" : "Attachments unavailable"
+        statusText = invalidAttachments.count == 1
+            ? appString("app_model.status.attachment_unavailable")
+            : appString("app_model.status.attachments_unavailable")
         appendLog(
-            title: "prompt blocked",
-            detail: invalidAttachments.map { "\($0.relativePath): \($0.status.displayText)" }.joined(separator: ", ")
+            title: appString("app_model.log.title.prompt_blocked"),
+            detail: invalidAttachments.map { "\($0.relativePath): \($0.status.displayText(l10n: l10n))" }.joined(separator: ", ")
         )
         return false
     }
@@ -1694,8 +1866,11 @@ public final class AppModel: ObservableObject {
 
     private func submitSkillSelection(_ skillIDs: [String]) {
         guard skillAvailability.isLoaded else {
-            statusText = "Skills unavailable"
-            appendLog(title: "skill selection failed", detail: "Skills are not available from the running pi process.")
+            statusText = appString("app_model.status.skills_unavailable")
+            appendLog(
+                title: appString("app_model.log.title.skill_selection_failed"),
+                detail: appString("app_model.log.detail.skills_unavailable")
+            )
             return
         }
 
@@ -1710,10 +1885,12 @@ public final class AppModel: ObservableObject {
             composerSelectionRange = NSRange(location: 0, length: 0)
             highlightedSkillID = nil
             dismissedSkillQuery = nil
-            statusText = pendingSelectedSkills.isEmpty ? "Ready" : "Skills selected"
+            statusText = pendingSelectedSkills.isEmpty
+                ? appString("app_model.status.ready")
+                : appString("app_model.status.skills_selected")
         } catch {
-            statusText = "Skill selection failed"
-            appendLog(title: "skill selection failed", detail: error.localizedDescription)
+            statusText = appString("app_model.status.skill_selection_failed")
+            appendLog(title: appString("app_model.log.title.skill_selection_failed"), detail: error.localizedDescription)
         }
     }
 
@@ -1753,13 +1930,16 @@ public final class AppModel: ObservableObject {
         }
 
         availableModels.removeAll()
-        modelName = "No model"
-        statusText = "Refreshing access"
+        modelName = appString("app_model.model.no_model")
+        statusText = appString("app_model.status.refreshing_access")
         let commandIDs = accessRefreshTracker.begin(
             state: &authAccess,
             credentialSnapshot: NativeAuthStore.credentialSnapshot()
         )
-        appendLog(title: "access refresh", detail: "reason=\(reason) epoch=\(commandIDs.epoch)")
+        appendLog(
+            title: appString("app_model.log.title.access_refresh"),
+            detail: appString("app_model.log.detail.access_refresh", reason, commandIDs.epoch)
+        )
 
         let sentState = sendCommand(.getState(id: commandIDs.stateCommandID))
         let sentModels = sendCommand(.getAvailableModels(id: commandIDs.modelsCommandID))
@@ -1770,9 +1950,9 @@ public final class AppModel: ObservableObject {
             ].compactMap { $0 }.joined(separator: ", ")
             _ = accessRefreshTracker.failCurrentRefresh(
                 state: &authAccess,
-                message: "Could not send \(failedCommands)."
+                message: appString("app_model.error.could_not_send_commands", failedCommands)
             )
-            statusText = "Access refresh failed"
+            statusText = appString("app_model.status.access_refresh_failed")
         }
     }
 
@@ -1788,7 +1968,7 @@ public final class AppModel: ObservableObject {
             subscriptionAccess: subscriptionAccess
         )
         availableModels.removeAll()
-        modelName = "No model"
+        modelName = appString("app_model.model.no_model")
     }
 
     private func authenticationStateFromCredentialStore() -> AuthenticationState {
@@ -1802,7 +1982,7 @@ public final class AppModel: ObservableObject {
             try client.send(command)
             return true
         } catch {
-            appendLog(title: "send failed", detail: error.localizedDescription)
+            appendLog(title: appString("app_model.log.title.send_failed"), detail: error.localizedDescription)
             return false
         }
     }
@@ -1825,7 +2005,7 @@ public final class AppModel: ObservableObject {
         switch effect {
         case .setStreaming(let value):
             isStreaming = value
-            statusText = value ? "Running" : "Ready"
+            statusText = value ? appString("app_model.status.running") : appString("app_model.status.ready")
         case .setCompacting(let value):
             isCompacting = value
         case .setQueuedWork(let update):
@@ -1843,7 +2023,10 @@ public final class AppModel: ObservableObject {
 
     func applyQueuedWorkUpdate(_ update: PiRPCQueueUpdate) {
         guard !isAwaitingQueuedWorkContextRefresh else {
-            appendLog(title: "ignored stale queue update", detail: "awaiting active session state")
+            appendLog(
+                title: appString("app_model.log.title.ignored_stale_queue_update"),
+                detail: appString("app_model.log.detail.awaiting_active_session_state")
+            )
             return
         }
         pendingMessageCount = update.pendingMessageCount
@@ -1874,7 +2057,7 @@ public final class AppModel: ObservableObject {
     }
 
     private func handleExtensionUIRequest(_ request: PiExtensionUIRequest) {
-        appendLog(title: "extension ui", detail: request.methodName)
+        appendLog(title: appString("app_model.log.title.extension_ui"), detail: request.methodName)
         switch extensionUIRouter.route(request) {
         case .command(let command):
             sendCommand(command)
@@ -1910,17 +2093,20 @@ public final class AppModel: ObservableObject {
 
     private func handleResponse(_ response: PiRPCResponse) {
         let command = response.command
-        let accessEffect = accessRefreshTracker.handle(response: response, state: &authAccess)
+        let accessEffect = accessRefreshTracker.handle(response: response, state: &authAccess, l10n: l10n)
 
         switch accessEffect {
         case .ignoredStale:
-            appendLog(title: "ignored stale access refresh", detail: "command=\(command) id=\(response.id ?? "unknown")")
+            appendLog(
+                title: appString("app_model.log.title.ignored_stale_access_refresh"),
+                detail: appString("app_model.log.detail.command_id", command, response.id ?? "unknown")
+            )
             return
         case .failed(let message):
             availableModels.removeAll()
-            modelName = "No model"
-            statusText = "Access refresh failed"
-            appendLog(title: "access refresh failed", detail: message)
+            modelName = appString("app_model.model.no_model")
+            statusText = appString("app_model.status.access_refresh_failed")
+            appendLog(title: appString("app_model.log.title.access_refresh_failed"), detail: message)
             return
         case .notAccessRefresh, .waiting, .completed:
             break
@@ -1929,19 +2115,22 @@ public final class AppModel: ObservableObject {
         if !response.success {
             if command == "get_commands" {
                 availableSkills = []
-                skillAvailability = .unavailable("Skills unavailable")
+                skillAvailability = .unavailable(appString("app_model.status.skills_unavailable"))
             }
-            appendLog(title: "\(command) failed", detail: response.error ?? "unknown error")
+            appendLog(
+                title: appString("app_model.log.title.command_failed", command),
+                detail: response.error ?? appString("app_model.error.unknown_error")
+            )
             return
         }
 
         if command == "get_state", let data = response.data {
             if let model = data["model"] as? [String: Any] {
                 let provider = PiRPCValue.string(model["provider"]) ?? ""
-                let name = PiRPCValue.string(model["name"]) ?? PiRPCValue.string(model["id"]) ?? "Model"
+                let name = PiRPCValue.string(model["name"]) ?? PiRPCValue.string(model["id"]) ?? appString("app_model.model.generic_model")
                 modelName = provider.isEmpty ? name : "\(provider)/\(name)"
             } else {
-                modelName = "No model"
+                modelName = appString("app_model.model.no_model")
             }
             thinkingLevel = PiRPCValue.string(data["thinkingLevel"]) ?? thinkingLevel
             isStreaming = data["isStreaming"] as? Bool ?? isStreaming
@@ -1953,10 +2142,13 @@ public final class AppModel: ObservableObject {
                 }
                 isAwaitingQueuedWorkContextRefresh = false
             } else if isAwaitingQueuedWorkContextRefresh && !canApplyQueuedWorkState {
-                appendLog(title: "ignored stale queue state", detail: "session state did not match active context")
+                appendLog(
+                    title: appString("app_model.log.title.ignored_stale_queue_state"),
+                    detail: appString("app_model.log.detail.session_state_mismatch")
+                )
             }
             if isCreatingNewSession {
-                sessionTitle = firstPromptTitle ?? "New chat"
+                sessionTitle = firstPromptTitle ?? appString("app_model.session.new_chat")
             } else if let name = PiRPCValue.string(data["sessionName"]), !name.isEmpty, !shouldReplaceGeneratedTitle(name) {
                 sessionTitle = name
             } else if let selectedSession, !shouldReplaceGeneratedTitle(selectedSession.title) {
@@ -1964,7 +2156,7 @@ public final class AppModel: ObservableObject {
             } else if let firstPromptTitle {
                 sessionTitle = firstPromptTitle
             } else {
-                sessionTitle = "New chat"
+                sessionTitle = appString("app_model.session.new_chat")
             }
             var didPersistSession = false
             if let sessionID = PiRPCValue.string(data["sessionId"]),
@@ -1978,8 +2170,8 @@ public final class AppModel: ObservableObject {
             }
         } else if command == "new_session" {
             selectedSessionID = nil
-            sessionTitle = "New chat"
-            statusText = "Ready"
+            sessionTitle = appString("app_model.session.new_chat")
+            statusText = appString("app_model.status.ready")
             conversationStore.currentAssistantID = nil
             clearQueuedWork(waitForContextRefresh: true)
             if let pendingPromptAfterNewSession {
@@ -1995,9 +2187,9 @@ public final class AppModel: ObservableObject {
             sendCommand(.getMessages())
         } else if command == "set_model", let data = response.data {
             let provider = PiRPCValue.string(data["provider"]) ?? ""
-            let name = PiRPCValue.string(data["name"]) ?? PiRPCValue.string(data["id"]) ?? "Model"
+            let name = PiRPCValue.string(data["name"]) ?? PiRPCValue.string(data["id"]) ?? appString("app_model.model.generic_model")
             modelName = provider.isEmpty ? name : "\(provider)/\(name)"
-            appendLog(title: "selected model", detail: modelName)
+            appendLog(title: appString("app_model.log.title.selected_model"), detail: modelName)
             refreshState()
         } else if command == "set_thinking_level" {
             refreshState()
@@ -2021,14 +2213,17 @@ public final class AppModel: ObservableObject {
         } else if command == "get_commands", let data = response.data {
             guard let commands = data["commands"] as? [[String: Any]] else {
                 availableSkills = []
-                skillAvailability = .unavailable("Skills unavailable")
+                skillAvailability = .unavailable(appString("app_model.status.skills_unavailable"))
                 return
             }
             availableSkills = SkillSelectionLogic.availableSkills(from: commands)
             skillAvailability = .loaded
         } else if command == "get_session_stats", let data = response.data {
             if let cost = data["cost"] as? Double {
-                appendLog(title: "session stats", detail: "cost $\(String(format: "%.4f", cost))")
+                appendLog(
+                    title: appString("app_model.log.title.session_stats"),
+                    detail: appString("app_model.log.detail.cost", String(format: "%.4f", cost))
+                )
             }
         } else if command == "get_messages", let data = response.data {
             let rpcMessages = data["messages"] as? [[String: Any]] ?? []
@@ -2038,7 +2233,7 @@ public final class AppModel: ObservableObject {
                 persistCurrentSessionSnapshot()
             }
         } else if command != "prompt" {
-            appendLog(title: command, detail: "ok")
+            appendLog(title: command, detail: appString("app_model.log.detail.ok"))
         }
 
         if case .completed(let models) = accessEffect {
@@ -2051,15 +2246,15 @@ public final class AppModel: ObservableObject {
         guard !isStreaming else { return }
         switch authAccess.modelAccess {
         case .available:
-            statusText = "Ready"
+            statusText = appString("app_model.status.ready")
         case .unavailable:
-            statusText = "No model access"
+            statusText = appString("app_model.status.no_model_access")
         case .failed:
-            statusText = "Access refresh failed"
+            statusText = appString("app_model.status.access_refresh_failed")
         case .unknown:
-            statusText = "Model access unknown"
+            statusText = appString("app_model.status.model_access_unknown")
         case .refreshing:
-            statusText = "Refreshing access"
+            statusText = appString("app_model.status.refreshing_access")
         }
     }
 
@@ -2074,7 +2269,9 @@ public final class AppModel: ObservableObject {
 
     private func upsertSession(sessionID: String, sessionFile: String) {
         guard let project = selectedProject else { return }
-        let title = shouldReplaceGeneratedTitle(sessionTitle) ? (firstPromptTitle ?? "New chat") : sessionTitle
+        let title = shouldReplaceGeneratedTitle(sessionTitle)
+            ? (firstPromptTitle ?? appString("app_model.session.new_chat"))
+            : sessionTitle
         sessionIndexStore.upsert(
             sessionID: sessionID,
             project: project,
@@ -2136,7 +2333,7 @@ public final class AppModel: ObservableObject {
             let text = PiRPCValue.text(from: rpcMessage["content"] ?? "")
             return ChatMessage(
                 role: .user,
-                title: "You",
+                title: appString("chat.message.title.you"),
                 text: SkillPromptDecorator.visibleUserPrompt(from: text)
             )
         case "assistant":
@@ -2163,18 +2360,14 @@ public final class AppModel: ObservableObject {
             }
         }
 
-        var title: String {
-            switch self {
-            case .previous: return "Previous session"
-            case .next: return "Next session"
-            }
-        }
+    }
 
-        var boundaryReason: String {
-            switch self {
-            case .previous: return "No previous session"
-            case .next: return "No next session"
-            }
+    private func sessionNavigationBoundaryReason(for direction: SessionNavigationDirection) -> String {
+        switch direction {
+        case .previous:
+            return appString("app_model.availability.no_previous_session")
+        case .next:
+            return appString("app_model.availability.no_next_session")
         }
     }
 
@@ -2184,15 +2377,19 @@ public final class AppModel: ObservableObject {
 
     private func shouldReplaceGeneratedTitle(_ title: String) -> Bool {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty || trimmed == "New chat" || trimmed == "New pi session" || trimmed.hasPrefix("Session ")
+        return trimmed.isEmpty ||
+            trimmed == "New chat" ||
+            trimmed == appString("app_model.session.new_chat") ||
+            trimmed == "New pi session" ||
+            trimmed.hasPrefix("Session ")
     }
 
     private func refreshGitDetails() {
         guard selectedProject != nil, !workspacePath.isEmpty else {
             gitDetails = GitBranchDetails(
-                branch: "No project selected",
+                branch: appString("app_model.git.no_project_selected"),
                 hasChanges: false,
-                changeSummary: "Open a project"
+                changeSummary: appString("app_model.git.open_project")
             )
             return
         }
@@ -2203,7 +2400,7 @@ public final class AppModel: ObservableObject {
 
             DispatchQueue.main.async {
                 if self.workspacePath == workspace {
-                    self.gitDetails = details
+                    self.gitDetails = self.localizedGitDetails(details)
                 }
             }
         }
@@ -2227,7 +2424,7 @@ public final class AppModel: ObservableObject {
     func refreshRepositoryChangeSnapshot() {
         guard selectedProject != nil, !workspacePath.isEmpty else {
             repositoryChangeSnapshotTask?.cancel()
-            repositoryChangeSnapshot = .unavailable(reason: "Open a project to review changes.")
+            repositoryChangeSnapshot = .unavailable(reason: appString("app_model.change_review.open_project"))
             return
         }
 
@@ -2249,16 +2446,50 @@ public final class AppModel: ObservableObject {
             guard !Task.isCancelled, let self, self.workspacePath == workspace else { return }
             self.repositoryChangeSnapshot = snapshot
             if case .failed(let message) = snapshot.status {
-                self.appendLog(title: "change review failed", detail: message)
+                self.appendLog(
+                    title: self.appString("app_model.log.title.change_review_failed"),
+                    detail: ChangeReviewPresentation.localizedGitMessage(message, l10n: self.l10n)
+                )
             }
             self.gitDetails = GitBranchDetails(
                 branch: snapshot.branch.isEmpty ? self.gitDetails.branch : snapshot.branch,
                 hasChanges: !snapshot.files.isEmpty,
-                changeSummary: snapshot.files.isEmpty ? "No changes" : "\(snapshot.files.count) changed file\(snapshot.files.count == 1 ? "" : "s")"
+                changeSummary: snapshot.files.isEmpty
+                    ? self.appString("app_model.git.no_changes")
+                    : self.appPlural("app_model.git.changed_files_count", count: snapshot.files.count),
+                changedFileCount: snapshot.files.count
             )
         }
     }
 
+    private func localizedGitDetails(_ details: GitBranchDetails) -> GitBranchDetails {
+        var localizedDetails = details
+
+        if details.branch == "Not a git repository" {
+            localizedDetails.branch = appString("app_model.git.not_repository")
+        } else if details.branch == "HEAD unavailable" {
+            localizedDetails.branch = appString("app_model.git.head_unavailable")
+        } else if details.branch.hasPrefix("detached ") {
+            let hash = String(details.branch.dropFirst("detached ".count))
+            localizedDetails.branch = appString("app_model.git.detached_head", hash)
+        }
+
+        if let count = details.changedFileCount {
+            localizedDetails.changeSummary = count > 0
+                ? appPlural("app_model.git.changed_files_count", count: count)
+                : appString("app_model.git.no_changes")
+        }
+
+        return localizedDetails
+    }
+
+}
+
+private struct StaticCommandPaletteAction {
+    let actionID: AppActionID
+    let subtitleKey: String?
+    let keywordsKey: String
+    let iconSystemName: String
 }
 
 private enum ResolvedCommandPaletteInvocation {

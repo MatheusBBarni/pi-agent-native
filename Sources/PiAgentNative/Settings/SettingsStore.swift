@@ -2,14 +2,30 @@ import Foundation
 
 @MainActor
 final class SettingsStore: ObservableObject {
-    @Published var customExecutablePath: String {
+    private enum DefaultsKey {
+        static let appLanguage = "appLanguage"
+        static let customExecutablePath = "customExecutablePath"
+    }
+
+    @Published var appLanguage: AppLanguage {
         didSet {
-            UserDefaults.standard.set(customExecutablePath, forKey: "customExecutablePath")
+            UserDefaults.standard.set(appLanguage.rawValue, forKey: DefaultsKey.appLanguage)
         }
     }
 
-    init(customExecutablePath: String = UserDefaults.standard.string(forKey: "customExecutablePath") ?? "") {
+    @Published var customExecutablePath: String {
+        didSet {
+            UserDefaults.standard.set(customExecutablePath, forKey: DefaultsKey.customExecutablePath)
+        }
+    }
+
+    init(
+        customExecutablePath: String = UserDefaults.standard.string(forKey: DefaultsKey.customExecutablePath) ?? "",
+        appLanguage: AppLanguage = UserDefaults.standard.string(forKey: DefaultsKey.appLanguage)
+            .flatMap(AppLanguage.init(rawValue:)) ?? .english
+    ) {
         self.customExecutablePath = customExecutablePath
+        self.appLanguage = appLanguage
     }
 
     var piMonoPath: String {

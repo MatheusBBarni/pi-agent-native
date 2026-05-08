@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "PiAgentNative",
+    defaultLocalization: "en",
     platforms: [
         .macOS(.v14)
     ],
@@ -20,6 +21,9 @@ let package = Package(
                 .product(name: "MarkdownUI", package: "swift-markdown-ui")
             ],
             path: "Sources/PiAgentNative",
+            resources: [
+                .process("Resources")
+            ],
             linkerSettings: [
                 .linkedLibrary("sqlite3")
             ]

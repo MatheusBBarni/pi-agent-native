@@ -1,11 +1,11 @@
 ---
-status: pending
+status: completed
 title: "Localize App Actions, Menus, and Command Palette"
 type: frontend
 complexity: high
 dependencies:
-  - task_02
-  - task_03
+    - task_02
+    - task_03
 ---
 
 # Task 06: Localize App Actions, Menus, and Command Palette

@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Add SwiftPM Localization Resources"
 type: infra
 complexity: medium
