@@ -21,9 +21,9 @@ $build-ios-apps:swiftui-ui-patterns
 
 Stage agent: engineer
 
-You are working on GitHub issue #21: Add steering and follow-up queue UI.
+You are working on GitHub issue #25: Add structured context attachments for File Mentions.
 
-Repository issue URL: https://github.com/MatheusBBarni/pi-agent-native/issues/21
+Repository issue URL: https://github.com/MatheusBBarni/pi-agent-native/issues/25
 Current project status: In progress
 Attempt: 
 

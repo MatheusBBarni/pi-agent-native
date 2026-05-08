@@ -9,7 +9,7 @@ struct PromptTextView: NSViewRepresentable {
     var fontSize = 15.0
     var isEditable = true
     var pendingTextReplacement: MentionTextReplacement?
-    var onTextReplacementApplied: (UUID) -> Void = { _ in }
+    var onTextReplacementApplied: (UUID, Bool) -> Void = { _, _ in }
     var onSelectionChange: (NSRange) -> Void = { _ in }
     var onMentionCommand: (MentionPickerCommand) -> Bool = { _ in false }
     var onSubmit: () -> Void
@@ -73,8 +73,8 @@ struct PromptTextView: NSViewRepresentable {
 
         if let pendingTextReplacement,
            context.coordinator.appliedReplacementID != pendingTextReplacement.id {
-            context.coordinator.apply(pendingTextReplacement, to: textView)
-            onTextReplacementApplied(pendingTextReplacement.id)
+            let wasApplied = context.coordinator.apply(pendingTextReplacement, to: textView)
+            onTextReplacementApplied(pendingTextReplacement.id, wasApplied)
             textView.needsDisplay = true
             return
         }
@@ -127,16 +127,15 @@ struct PromptTextView: NSViewRepresentable {
             onSelectionChange(textView.selectedRange())
         }
 
-        func apply(_ replacement: MentionTextReplacement, to textView: NSTextView) {
+        func apply(_ replacement: MentionTextReplacement, to textView: NSTextView) -> Bool {
             let utf16Count = textView.string.utf16.count
             guard replacement.range.location >= 0,
                   replacement.range.length >= 0,
                   replacement.range.location + replacement.range.length <= utf16Count
-            else { return }
+            else { return false }
 
-            appliedReplacementID = replacement.id
             guard textView.shouldChangeText(in: replacement.range, replacementString: replacement.text) else {
-                return
+                return false
             }
             textView.textStorage?.replaceCharacters(in: replacement.range, with: replacement.text)
             textView.didChangeText()
@@ -144,6 +143,8 @@ struct PromptTextView: NSViewRepresentable {
                 location: replacement.range.location + (replacement.text as NSString).length,
                 length: 0
             ))
+            appliedReplacementID = replacement.id
+            return true
         }
     }
 }
