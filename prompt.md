@@ -21,9 +21,9 @@ $build-ios-apps:swiftui-ui-patterns
 
 Stage agent: engineer
 
-You are working on GitHub issue #23: Add native command palette for App Actions.
+You are working on GitHub issue #21: Add steering and follow-up queue UI.
 
-Repository issue URL: https://github.com/MatheusBBarni/pi-agent-native/issues/23
+Repository issue URL: https://github.com/MatheusBBarni/pi-agent-native/issues/21
 Current project status: In progress
 Attempt: 
 

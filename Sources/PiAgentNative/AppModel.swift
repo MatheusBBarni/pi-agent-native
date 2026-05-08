@@ -16,6 +16,7 @@ public final class AppModel: ObservableObject {
     @Published var modelName = "No model"
     @Published var thinkingLevel = "medium"
     @Published var pendingMessageCount = 0
+    @Published var queuedWorkDisplayState: QueuedWorkDisplayState = .empty
     @Published var availableModels: [PiModel] = []
     @Published var authAccess = AuthAccessState()
     @Published var availableSkills: [AvailableSkill] = []
@@ -71,6 +72,7 @@ public final class AppModel: ObservableObject {
     private var shouldSwitchToStoredSessionAfterStart = true
     private var isCreatingNewSession = false
     private var isSwitchingSession = false
+    private var isAwaitingQueuedWorkContextRefresh = false
     private var pendingPromptAfterNewSession: String?
     private var mentionIndexCache: [String: [MentionIndexEntry]] = [:]
     private var mentionIndexTask: Task<Void, Never>?
@@ -194,6 +196,7 @@ public final class AppModel: ObservableObject {
             guard let self else { return }
             self.isConnected = false
             self.isStreaming = false
+            self.clearQueuedWork()
             self.availableSkills = []
             self.skillAvailability = .unavailable("Skills unavailable")
             self.pendingSelectedSkills.removeAll()
@@ -287,6 +290,7 @@ public final class AppModel: ObservableObject {
     }
 
     public func start() {
+        clearQueuedWork()
         guard let selectedProject else {
             statusText = "Open a project"
             launchDetail = "Choose a project folder before starting pi"
@@ -333,6 +337,7 @@ public final class AppModel: ObservableObject {
         client.stop()
         isConnected = false
         isStreaming = false
+        clearQueuedWork()
         statusText = "Stopped"
         clearSkillSelectionState(clearAvailableSkills: true)
         clearAuthDerivedState(authentication: authenticationStateFromCredentialStore())
@@ -407,6 +412,7 @@ public final class AppModel: ObservableObject {
         selectedSessionID = nil
         conversationStore.clear()
         toolActivityStore.clear()
+        clearQueuedWork(waitForContextRefresh: true)
         sessionTitle = "New chat"
         statusText = isConnected ? "Ready" : statusText
         isCreatingNewSession = false
@@ -1483,6 +1489,7 @@ public final class AppModel: ObservableObject {
         statusText = session.status
         sessionIndexStore.touch(session)
         conversationStore.clear()
+        clearQueuedWork(waitForContextRefresh: true)
         isSwitchingSession = true
         isCreatingNewSession = false
         if let project = projects.first(where: { $0.path == session.projectPath }) {
@@ -1502,6 +1509,7 @@ public final class AppModel: ObservableObject {
         } else {
             ensureConnected()
         }
+        isAwaitingQueuedWorkContextRefresh = true
         sendCommand(.switchSession(sessionPath: session.sessionFile))
     }
 
@@ -1647,8 +1655,8 @@ public final class AppModel: ObservableObject {
             statusText = value ? "Running" : "Ready"
         case .setCompacting(let value):
             isCompacting = value
-        case .setPendingMessageCount(let count):
-            pendingMessageCount = count
+        case .setQueuedWork(let update):
+            applyQueuedWorkUpdate(update)
         case .appendLog(let title, let detail):
             appendLog(title: title, detail: detail)
         case .refreshState:
@@ -1656,6 +1664,38 @@ public final class AppModel: ObservableObject {
         case .extensionUIRequest(let request):
             handleExtensionUIRequest(request)
         }
+    }
+
+    func applyQueuedWorkUpdate(_ update: PiRPCQueueUpdate) {
+        guard !isAwaitingQueuedWorkContextRefresh else {
+            appendLog(title: "ignored stale queue update", detail: "awaiting active session state")
+            return
+        }
+        pendingMessageCount = update.pendingMessageCount
+        queuedWorkDisplayState = update.entries.isEmpty ? .empty : .entries(update.entries)
+    }
+
+    func applyPendingMessageCount(_ count: Int) {
+        let count = max(0, count)
+        pendingMessageCount = count
+
+        guard count > 0 else {
+            queuedWorkDisplayState = .empty
+            return
+        }
+
+        if case .entries(let entries) = queuedWorkDisplayState,
+           entries.count == count {
+            return
+        }
+
+        queuedWorkDisplayState = .countOnly(count)
+    }
+
+    func clearQueuedWork(waitForContextRefresh: Bool = false) {
+        pendingMessageCount = 0
+        queuedWorkDisplayState = .empty
+        isAwaitingQueuedWorkContextRefresh = waitForContextRefresh
     }
 
     private func handleExtensionUIRequest(_ request: PiExtensionUIRequest) {
@@ -1731,7 +1771,15 @@ public final class AppModel: ObservableObject {
             thinkingLevel = PiRPCValue.string(data["thinkingLevel"]) ?? thinkingLevel
             isStreaming = data["isStreaming"] as? Bool ?? isStreaming
             isCompacting = data["isCompacting"] as? Bool ?? isCompacting
-            pendingMessageCount = data["pendingMessageCount"] as? Int ?? pendingMessageCount
+            let canApplyQueuedWorkState = canApplyQueuedWorkState(from: data)
+            if canApplyQueuedWorkState {
+                if let count = data["pendingMessageCount"] as? Int {
+                    applyPendingMessageCount(count)
+                }
+                isAwaitingQueuedWorkContextRefresh = false
+            } else if isAwaitingQueuedWorkContextRefresh && !canApplyQueuedWorkState {
+                appendLog(title: "ignored stale queue state", detail: "session state did not match active context")
+            }
             if isCreatingNewSession {
                 sessionTitle = firstPromptTitle ?? "New chat"
             } else if let name = PiRPCValue.string(data["sessionName"]), !name.isEmpty, !shouldReplaceGeneratedTitle(name) {
@@ -1758,6 +1806,7 @@ public final class AppModel: ObservableObject {
             sessionTitle = "New chat"
             statusText = "Ready"
             conversationStore.currentAssistantID = nil
+            clearQueuedWork(waitForContextRefresh: true)
             if let pendingPromptAfterNewSession {
                 self.pendingPromptAfterNewSession = nil
                 sendPromptCommand(pendingPromptAfterNewSession)
@@ -1872,6 +1921,24 @@ public final class AppModel: ObservableObject {
             return sessionID == selectedSessionID
         }
         return selectedProject != nil
+    }
+
+    private func canApplyQueuedWorkState(from data: [String: Any]) -> Bool {
+        guard isAwaitingQueuedWorkContextRefresh else { return true }
+
+        guard let sessionID = PiRPCValue.string(data["sessionId"]) else {
+            return false
+        }
+
+        if isCreatingNewSession {
+            return true
+        }
+
+        guard let selectedSessionID else {
+            return false
+        }
+
+        return sessionID == selectedSessionID
     }
 
     private func persistState() {
