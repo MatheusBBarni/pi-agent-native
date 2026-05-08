@@ -77,6 +77,46 @@ final class ContextAttachmentSubmissionTests: XCTestCase {
         XCTAssertTrue(model.canPerformAppAction(.sendPrompt))
     }
 
+    func testFailedMentionReplacementDoesNotInsertContextAttachment() throws {
+        let root = temporaryDirectory()
+        let file = root.appendingPathComponent("README.md")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: file.path, contents: Data())
+        defer { try? FileManager.default.removeItem(at: root) }
+        let project = ProjectItem(id: "project-a", name: "Project", path: root.path)
+        let entry = MentionIndexEntry(
+            id: "README.md",
+            displayName: "README.md",
+            relativePath: "README.md",
+            isDirectory: false,
+            isSymlink: false,
+            isHidden: false,
+            resolvedURL: file
+        )
+        let model = AppModel()
+        model.projects = [project]
+        model.selectedProjectID = project.id
+        model.workspacePath = project.path
+        model.composerText = "@REA"
+        model.mentionPickerState = MentionPickerState(
+            query: MentionQuery(
+                range: model.composerText.startIndex..<model.composerText.endIndex,
+                rawText: "@REA",
+                searchText: "REA"
+            ),
+            results: [MentionSearchResult(entry: entry, score: 10, displayNameMatched: true)],
+            highlightedResultID: entry.id,
+            status: .ready
+        )
+
+        model.insertMentionResult(entry.id)
+        let replacementID = try XCTUnwrap(model.pendingMentionTextReplacement?.id)
+        model.mentionTextReplacementWasApplied(replacementID, wasApplied: false)
+
+        XCTAssertNil(model.pendingMentionTextReplacement)
+        XCTAssertTrue(model.pendingContextAttachments.isEmpty)
+    }
+
     private func temporaryDirectory() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

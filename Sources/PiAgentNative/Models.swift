@@ -108,6 +108,63 @@ struct GitBranchDetails: Equatable {
     var changeSummary: String = "No changes"
 }
 
+enum QueuedWorkKind: String, Equatable {
+    case steering
+    case followUp
+
+    var title: String {
+        switch self {
+        case .steering:
+            return "Steering"
+        case .followUp:
+            return "Follow-up"
+        }
+    }
+}
+
+struct QueuedWorkEntry: Identifiable, Equatable {
+    var id: String
+    var kind: QueuedWorkKind
+    var text: String
+    var position: Int
+
+    init(kind: QueuedWorkKind, text: String, position: Int) {
+        self.id = "\(kind.rawValue)-\(position)"
+        self.kind = kind
+        self.text = text
+        self.position = position
+    }
+
+    var title: String {
+        kind.title
+    }
+
+    var summary: String {
+        Self.normalizedSummary(for: text)
+    }
+
+    func summary(maxLength: Int) -> String {
+        let normalized = summary
+        guard maxLength > 3, normalized.count > maxLength else {
+            return normalized
+        }
+        return String(normalized.prefix(maxLength - 3)) + "..."
+    }
+
+    static func normalizedSummary(for text: String) -> String {
+        let normalized = text
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        return normalized.isEmpty ? "Empty queued message" : normalized
+    }
+}
+
+enum QueuedWorkDisplayState: Equatable {
+    case empty
+    case countOnly(Int)
+    case entries([QueuedWorkEntry])
+}
+
 struct EventLog: Identifiable, Equatable {
     let id = UUID()
     var title: String
