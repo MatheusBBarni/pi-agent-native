@@ -26,6 +26,23 @@ struct InspectorView: View {
                         }
                     }
 
+                    InspectorCard(title: "Changes") {
+                        InspectorMetric(
+                            icon: changesIcon,
+                            title: changesSummary
+                        )
+                        Button {
+                            model.openChangeReview()
+                        } label: {
+                            Label("Review", systemImage: "doc.text.magnifyingglass")
+                                .uiFont(size: 13, weight: .medium)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(model.selectedProject == nil)
+                        .help(model.selectedProject == nil ? "Open a project first" : "Review repository changes")
+                    }
+
                     if !model.tools.isEmpty {
                         InspectorCard(title: "Tool activity") {
                             ForEach(model.tools) { tool in
@@ -49,6 +66,37 @@ struct InspectorView: View {
             Rectangle()
                 .fill(Theme.border)
                 .frame(width: 1)
+        }
+    }
+
+    private var changesIcon: String {
+        switch model.repositoryChangeSnapshot.status {
+        case .loading:
+            return "arrow.triangle.2.circlepath"
+        case .dirty:
+            return "doc.on.doc"
+        case .clean:
+            return "checkmark.circle"
+        case .notRepository, .unavailable, .failed:
+            return "exclamationmark.triangle"
+        }
+    }
+
+    private var changesSummary: String {
+        switch model.repositoryChangeSnapshot.status {
+        case .loading:
+            return "Refreshing changes"
+        case .dirty:
+            let count = model.repositoryChangeSnapshot.files.count
+            return "\(count) changed file\(count == 1 ? "" : "s")"
+        case .clean:
+            return "No changes"
+        case .notRepository:
+            return "Not a Git repository"
+        case .unavailable(let reason):
+            return reason
+        case .failed(let message):
+            return message
         }
     }
 }

@@ -28,6 +28,7 @@ public final class AppModel: ObservableObject {
     @Published var isShowingProcessLog = false
     @Published var isShowingSettings = false
     @Published var isShowingKeybindingHelp = false
+    @Published var isShowingChangeReview = false
     @Published var isSidebarVisible = true
     @Published var isInspectorVisible = true
     @Published var composerFocusRequest = 0
@@ -47,6 +48,7 @@ public final class AppModel: ObservableObject {
         }
     }
     @Published var gitDetails = GitBranchDetails()
+    @Published var repositoryChangeSnapshot = RepositoryChangeSnapshot.unavailable(reason: "Open a project to review changes.")
     @Published var mentionPickerState: MentionPickerState?
     @Published var pendingMentionTextReplacement: MentionTextReplacement?
 
@@ -71,8 +73,11 @@ public final class AppModel: ObservableObject {
     private var pendingPromptAfterNewSession: String?
     private var mentionIndexCache: [String: [MentionIndexEntry]] = [:]
     private var mentionIndexTask: Task<Void, Never>?
+    private var repositoryChangeSnapshotTask: Task<Void, Never>?
+    private var debouncedRepositoryChangeSnapshotTask: Task<Void, Never>?
     private var mentionIndexLoadingProjectPath: String?
     private var handledSubscriptionLoginAttemptIDs: Set<UUID> = []
+    var repositoryChangeRefreshDelayNanoseconds: UInt64 = 500_000_000
 
     var workspacePath: String {
         get { workspaceStore.workspacePath }
@@ -174,6 +179,7 @@ public final class AppModel: ObservableObject {
         persistState()
         bindStoreChanges()
         refreshGitDetails()
+        refreshRepositoryChangeSnapshot()
 
         oauthLoginRunner.onCompletion = { [weak self] provider, attemptID, exitStatus in
             Task { @MainActor in
@@ -553,6 +559,7 @@ public final class AppModel: ObservableObject {
             isShowingLogin ||
             isShowingModelPicker ||
             isShowingProcessLog ||
+            isShowingChangeReview ||
             extensionUIRouter.activeRequest != nil
     }
 
@@ -567,6 +574,8 @@ public final class AppModel: ObservableObject {
             isShowingModelPicker = false
         } else if isShowingProcessLog {
             isShowingProcessLog = false
+        } else if isShowingChangeReview {
+            isShowingChangeReview = false
         } else if extensionUIRouter.activeRequest != nil {
             cancelExtensionUIRequest()
         }
@@ -590,6 +599,16 @@ public final class AppModel: ObservableObject {
             sendCommand(.getCommands())
         }
         refreshGitDetails()
+        refreshRepositoryChangeSnapshot()
+    }
+
+    func openChangeReview() {
+        guard selectedProject != nil else {
+            repositoryChangeSnapshot = .unavailable(reason: "Open a project to review changes.")
+            return
+        }
+        isShowingChangeReview = true
+        refreshRepositoryChangeSnapshot()
     }
 
     func canNavigateToPreviousSession() -> Bool {
@@ -859,6 +878,7 @@ public final class AppModel: ObservableObject {
         clearSkillSelectionState(clearAvailableSkills: shouldRestart)
         persistState()
         refreshGitDetails()
+        refreshRepositoryChangeSnapshot()
         if shouldRestart {
             restartRPC()
         }
@@ -888,6 +908,28 @@ public final class AppModel: ObservableObject {
                     self.appendLog(
                         title: "open externally failed",
                         detail: "target=\(target.displayName) projectPath=\(projectPath) error=\(error.localizedDescription)"
+                    )
+                }
+            }
+        }
+    }
+
+    func openChangedFileExternally(_ file: ChangedFile, target: AvailableExternalTarget) {
+        guard let selectedProject else {
+            statusText = "Open a project"
+            return
+        }
+
+        let fileURL = URL(fileURLWithPath: selectedProject.path).appendingPathComponent(file.path)
+        let launchPath = FileManager.default.fileExists(atPath: fileURL.path) ? fileURL.path : selectedProject.path
+        externalTargetLauncher(target, launchPath) { [weak self] result in
+            Task { @MainActor in
+                guard let self else { return }
+                if case .failure(let error) = result {
+                    self.statusText = "Could not open \(file.path) in \(target.displayName)"
+                    self.appendLog(
+                        title: "open changed file failed",
+                        detail: "target=\(target.displayName) path=\(launchPath) error=\(error.localizedDescription)"
                     )
                 }
             }
@@ -1142,6 +1184,8 @@ public final class AppModel: ObservableObject {
         } else {
             ensureConnected()
         }
+        refreshGitDetails()
+        refreshRepositoryChangeSnapshot()
         sendCommand(.switchSession(sessionPath: session.sessionFile))
     }
 
@@ -1293,6 +1337,8 @@ public final class AppModel: ObservableObject {
             appendLog(title: title, detail: detail)
         case .refreshState:
             refreshState()
+        case .refreshRepositoryChanges:
+            scheduleRepositoryChangeSnapshotRefresh()
         case .extensionUIRequest(let request):
             handleExtensionUIRequest(request)
         }
@@ -1600,6 +1646,56 @@ public final class AppModel: ObservableObject {
                     self.gitDetails = details
                 }
             }
+        }
+    }
+
+    func scheduleRepositoryChangeSnapshotRefresh() {
+        debouncedRepositoryChangeSnapshotTask?.cancel()
+        let delay = repositoryChangeRefreshDelayNanoseconds
+        debouncedRepositoryChangeSnapshotTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: delay)
+            } catch {
+                return
+            }
+            await MainActor.run {
+                self?.refreshRepositoryChangeSnapshot()
+            }
+        }
+    }
+
+    func refreshRepositoryChangeSnapshot() {
+        guard selectedProject != nil, !workspacePath.isEmpty else {
+            repositoryChangeSnapshotTask?.cancel()
+            repositoryChangeSnapshot = .unavailable(reason: "Open a project to review changes.")
+            return
+        }
+
+        let workspace = workspacePath
+        repositoryChangeSnapshotTask?.cancel()
+        repositoryChangeSnapshot = RepositoryChangeSnapshot(
+            projectPath: workspace,
+            branch: repositoryChangeSnapshot.projectPath == workspace ? repositoryChangeSnapshot.branch : gitDetails.branch,
+            files: repositoryChangeSnapshot.projectPath == workspace ? repositoryChangeSnapshot.files : [],
+            loadedAt: repositoryChangeSnapshot.loadedAt,
+            status: .loading
+        )
+
+        repositoryChangeSnapshotTask = Task { [weak self] in
+            let snapshot = await Task.detached(priority: .utility) {
+                GitService.repositoryChangeSnapshot(for: workspace)
+            }.value
+
+            guard !Task.isCancelled, let self, self.workspacePath == workspace else { return }
+            self.repositoryChangeSnapshot = snapshot
+            if case .failed(let message) = snapshot.status {
+                self.appendLog(title: "change review failed", detail: message)
+            }
+            self.gitDetails = GitBranchDetails(
+                branch: snapshot.branch.isEmpty ? self.gitDetails.branch : snapshot.branch,
+                hasChanges: !snapshot.files.isEmpty,
+                changeSummary: snapshot.files.isEmpty ? "No changes" : "\(snapshot.files.count) changed file\(snapshot.files.count == 1 ? "" : "s")"
+            )
         }
     }
 
